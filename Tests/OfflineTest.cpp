@@ -223,6 +223,64 @@ int main (int argc, char* argv[])
         }
     }
 
+    // --- octaver: down / up land on the right pitch, both modes
+    {
+        const auto measure = [&] (int mode, float d1, float u1)
+        {
+            auto p = makeProc (48000, 512);
+            for (int c = 0; c < kGridCells; ++c) if (p->unitAtCell (c) >= 0) p->removeBlock (c);
+            const int u = p->addBlock (0, BlockType::Octaver);
+            setNorm (p->unitParam (u, 0), 0.0f);
+            setNorm (p->unitParam (u, 1), d1);
+            setNorm (p->unitParam (u, 2), u1);
+            setNorm (p->unitParam (u, 3), 0.0f);    // no dry
+            setNorm (p->unitParam (u, 4), 1.0f);    // tone open
+            setNorm (p->unitParam (u, 5), (float) mode);
+            AudioBuffer<float> b (2, 512);
+            MidiBuffer m;
+            double ph = 0;
+            std::vector<float> out;
+            for (int k = 0; k < 120; ++k)
+            {
+                for (int i = 0; i < 512; ++i) { const float s = 0.3f * (float) std::sin (ph); b.setSample (0, i, s); b.setSample (1, i, s); ph += MathConstants<double>::twoPi * 220.0 / 48000.0; }
+                p->processBlock (b, m);
+                if (k >= 40) for (int i = 0; i < 512; ++i) out.push_back (b.getSample (0, i));
+            }
+            // normalised autocorrelation over the steady part; pick the strongest lag in 60..900 Hz
+            const int N = 16384, minLag = 48000 / 900, maxLag = 48000 / 60;
+            double mean = 0; for (int i = 0; i < N + maxLag; ++i) mean += out[(size_t) i]; mean /= (N + maxLag);
+            std::vector<double> r ((size_t) maxLag + 2, 0.0);
+            double top = -1e9;
+            for (int lag = minLag; lag <= maxLag + 1; ++lag)
+            {
+                double num = 0, e1 = 0, e2 = 0;
+                for (int i = 0; i < N; ++i)
+                {
+                    const double a = out[(size_t) i] - mean, c = out[(size_t) (i + lag)] - mean;
+                    num += a * c; e1 += a * a; e2 += c * c;
+                }
+                r[(size_t) lag] = num / std::sqrt (e1 * e2 + 1e-12);
+                top = jmax (top, r[(size_t) lag]);
+            }
+            // first peak that is nearly as strong as the best one = fundamental period
+            for (int lag = minLag + 1; lag <= maxLag; ++lag)
+                if (r[(size_t) lag] >= 0.9 * top && r[(size_t) lag] >= r[(size_t) lag - 1] && r[(size_t) lag] >= r[(size_t) lag + 1])
+                {
+                    const double a = r[(size_t) lag - 1], b2 = r[(size_t) lag], c = r[(size_t) lag + 1];
+                    const double den = a - 2 * b2 + c;
+                    const double shift = std::abs (den) > 1e-12 ? 0.5 * (a - c) / den : 0.0;
+                    return (float) (48000.0 / (lag + shift));
+                }
+            return 0.0f;
+        };
+        const float polyDown = measure (0, 1.0f, 0.0f), polyUp = measure (0, 0.0f, 1.0f);
+        const float anaDown = measure (1, 1.0f, 0.0f), anaUp = measure (1, 0.0f, 1.0f);
+        check (std::abs (polyDown - 110.0f) < 6.0f, "octaver polyphonic -1 oct: 220 Hz -> " + String (polyDown, 1) + " Hz");
+        check (std::abs (polyUp - 440.0f) < 20.0f,  "octaver polyphonic +1 oct: 220 Hz -> " + String (polyUp, 1) + " Hz");
+        check (std::abs (anaDown - 110.0f) < 3.0f,  "octaver analog -1 oct: 220 Hz -> " + String (anaDown, 1) + " Hz");
+        check (std::abs (anaUp - 440.0f) < 10.0f,   "octaver analog +1 oct: 220 Hz -> " + String (anaUp, 1) + " Hz");
+    }
+
     // --- parallel paths: B path changes output; merge levels work
     {
         auto run = [&] (bool withB)

@@ -127,6 +127,17 @@ void drawBlockIcon (Graphics& g, BlockType t, Rectangle<float> r, Colour c)
             g.strokePath (p, stroke);
             break;
         }
+        case BlockType::Octaver:
+        {
+            // two notes an octave apart
+            for (int k = 0; k < 2; ++k)
+            {
+                const float nx = cx + (k == 0 ? -s * 0.35f : s * 0.25f), ny = cy + (k == 0 ? s * 0.25f : -s * 0.2f);
+                g.fillEllipse (Rectangle<float> (s * 0.3f, s * 0.22f).withCentre ({ nx, ny }));
+                g.drawLine (nx + s * 0.14f, ny, nx + s * 0.14f, ny - s * 0.5f, 1.5f);
+            }
+            break;
+        }
         case BlockType::Empty: case BlockType::NumTypes: break;
     }
 }

@@ -28,10 +28,11 @@ enum class BlockType : int
     Chorus, Flanger, Phaser, Tremolo, Wah,
     Delay, Reverb,
     Volume,
+    Octaver,      // appended: block type numbers are stored in presets
     NumTypes
 };
 
-enum class Category { Dynamics, Drive, AmpCab, Eq, Modulation, Filter, Time, Utility };
+enum class Category { Dynamics, Drive, AmpCab, Eq, Modulation, Filter, Pitch, Time, Utility };
 
 enum class Fmt { Percent, Db, Hz, Ms, Ratio, Plain, Choice };
 
@@ -149,6 +150,9 @@ inline const BlockInfo& blockInfo (BlockType t)
           { P { "SIZE", 0, 1, 0.55f }, P { "DAMPING", 0, 1, 0.5f }, P { "WIDTH", 0, 1, 1 }, P { "MIX", 0, 1, 0.2f }, P { "PRE-DLY", 0, 120, 10, Fmt::Ms } } },
         { "VOL", "VOLUME / PAN", Category::Utility, col::util,
           { P { "VOLUME", -60, 12, 0, Fmt::Db }, P { "PAN", -1, 1, 0, Fmt::Plain } } },
+        { "OCT", "OCTAVER", Category::Pitch, 0xffff8a5c,
+          { P { "-2 OCT", 0, 1, 0 }, P { "-1 OCT", 0, 1, 0.7f }, P { "+1 OCT", 0, 1, 0 }, P { "DRY", 0, 1, 0.8f },
+            P { "TONE", 0, 1, 0.6f }, P { "MODE", 0, 1, 0, Fmt::Choice, false, "Polyphonic|Analog" } } },
     }};
     return table[(size_t) juce::jlimit (0, (int) BlockType::NumTypes - 1, (int) t)];
 }
@@ -164,6 +168,7 @@ inline const char* categoryName (Category c)
         case Category::Modulation: return "Modulacion";
         case Category::Filter:     return "Filtro";
         case Category::Time:       return "Delay / Reverb";
+        case Category::Pitch:      return "Octavador / Pitch";
         case Category::Utility:    return "Utilidad";
     }
     return "";

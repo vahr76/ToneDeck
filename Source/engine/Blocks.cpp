@@ -493,6 +493,123 @@ public:
 private:
     LinearSmoothedValue<float> gl, gr;
 };
+//==============================================================================
+// Octaver. Polyphonic: two crossfaded delay-line pitch shifters per interval (works with chords).
+// Analog: OC-2 style flip-flop sub octaves + full-wave-rectifier octave up (single notes, synthy).
+class OctaverBlock final : public Block
+{
+public:
+    OctaverBlock() : Block (BlockType::Octaver) {}
+
+    void prepare (double s, int maxBlock) override
+    {
+        sr = s;
+        window = jmax (512, (int) (s * 0.05));   // 50 ms grains
+        buf.assign ((size_t) (window * 4), 0.0f);
+        w = 0;
+        for (auto& sh : shifters) sh.phase = 0.0;
+        mono.assign ((size_t) maxBlock, 0.0f);
+        resetAnalog();
+    }
+    void reset() override { std::fill (buf.begin(), buf.end(), 0.0f); resetAnalog(); }
+
+    void process (float* L, float* R, int n, const float* p, const RigContext&) override
+    {
+        if ((int) mono.size() < n) return;
+        const float down2 = p[0], down1 = p[1], up1 = p[2], dry = p[3];
+        const float toneHz = 300.0f * std::pow (20.0f, p[4]);          // 300 Hz .. 6 kHz
+        const float toneCoef = std::exp (-MathConstants<float>::twoPi * toneHz / (float) sr);
+        const bool analog = p[5] > 0.5f;
+
+        for (int i = 0; i < n; ++i) mono[(size_t) i] = 0.5f * (L[i] + R[i]);
+
+        for (int i = 0; i < n; ++i)
+        {
+            const float x = mono[(size_t) i];
+            float wet = 0.0f;
+            if (analog)
+                wet = analogStep (x, down2, down1, up1);
+            else
+            {
+                const int size = (int) buf.size();
+                buf[(size_t) w] = x;
+                if (down2 > 0.001f) wet += down2 * shift (shifters[0], 0.25, x);
+                if (down1 > 0.001f) wet += down1 * shift (shifters[1], 0.5, x);
+                if (up1   > 0.001f) wet += up1   * shift (shifters[2], 2.0, x) * 0.9f;
+                w = (w + 1) % size;
+            }
+            lp = wet + (lp - wet) * toneCoef;                              // tone only darkens the octaves
+            L[i] = R[i] = x * dry + lp;
+        }
+    }
+
+private:
+    struct Shifter { double phase = 0.0; };
+
+    float read (double delay) const
+    {
+        const int size = (int) buf.size();
+        double rp = (double) w - delay;
+        while (rp < 0.0) rp += size;
+        const int i0 = (int) rp % size, i1 = (i0 + 1) % size;
+        const float f = (float) (rp - std::floor (rp));
+        return buf[(size_t) i0] + f * (buf[(size_t) i1] - buf[(size_t) i0]);
+    }
+
+    // classic two-tap rotating delay: the delay changes at (1 - ratio) samples per sample
+    float shift (Shifter& sh, double ratio, float)
+    {
+        const double W = (double) window;
+        sh.phase += (1.0 - ratio);
+        while (sh.phase >= W) sh.phase -= W;
+        while (sh.phase < 0.0) sh.phase += W;
+        const double d1 = sh.phase + 2.0, d2 = std::fmod (sh.phase + W * 0.5, W) + 2.0;
+        const float g1 = (float) std::sin (MathConstants<double>::pi * sh.phase / W);
+        const float g2 = (float) std::sin (MathConstants<double>::pi * std::fmod (sh.phase + W * 0.5, W) / W);
+        return read (d1) * g1 * g1 + read (d2) * g2 * g2;
+    }
+
+    float analogStep (float x, float down2, float down1, float up1)
+    {
+        // track the fundamental: low-pass, then Schmitt-trigger zero crossings drive flip-flops
+        trackLp = x + (trackLp - x) * trackCoef;
+        trackLp2 = trackLp + (trackLp2 - trackLp) * trackCoef;
+        const float e = std::abs (x);
+        env = e > env ? env + (e - env) * 0.01f : env * envRelease;
+        const float hyst = 0.02f * env + 1e-4f;
+        const bool high = trackLp2 > hyst ? true : (trackLp2 < -hyst ? false : lastHigh);
+        if (high && ! lastHigh)
+        {
+            ff1 = -ff1;
+            if (ff1 > 0.0f) ff2 = -ff2;
+        }
+        lastHigh = high;
+        const float gate = env > 0.002f ? 1.0f : env / 0.002f;
+        float y = (down1 * ff1 + down2 * ff2) * env * 1.6f * gate;
+        // octave up: full-wave rectified signal minus its DC
+        const float rect = std::abs (x);
+        upDc = rect + (upDc - rect) * 0.999f;
+        y += up1 * (rect - upDc) * 1.8f;
+        return y;
+    }
+
+    void resetAnalog()
+    {
+        trackCoef  = std::exp (-MathConstants<float>::twoPi * 500.0f / (float) sr);
+        envRelease = std::exp (-1.0f / (0.08f * (float) sr));
+        trackLp = trackLp2 = env = upDc = lp = 0.0f;
+        ff1 = ff2 = 1.0f;
+        lastHigh = false;
+    }
+
+    double sr = 48000.0;
+    int window = 2400, w = 0;
+    std::vector<float> buf, mono;
+    std::array<Shifter, 3> shifters;
+    float trackCoef = 0.9f, envRelease = 0.999f, trackLp = 0, trackLp2 = 0, env = 0, upDc = 0, lp = 0;
+    float ff1 = 1.0f, ff2 = 1.0f;
+    bool lastHigh = false;
+};
 } // namespace
 
 //==============================================================================
@@ -596,6 +713,7 @@ std::unique_ptr<Block> createBlock (BlockType t)
         case BlockType::Delay:      return std::make_unique<DelayBlock>();
         case BlockType::Reverb:     return std::make_unique<ReverbBlock>();
         case BlockType::Volume:     return std::make_unique<VolumeBlock>();
+        case BlockType::Octaver:    return std::make_unique<OctaverBlock>();
         case BlockType::Empty:
         case BlockType::NumTypes:   break;
     }
