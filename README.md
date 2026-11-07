@@ -1,28 +1,42 @@
 # ToneDeck — Neural Amp & IR Multi-FX
 
-Plugin de guitarra que carga **capturas NAM** (incluida la nueva arquitectura **A2 / slimmable**), **modelos AIDA-X** (.json de RTNeural) y **respuestas de impulso (IR)** de gabinete, con una interfaz estilo pedalera multiefectos compacta: pantalla a color con la cadena de bloques, perillas asignables y footswitches.
+Multiefectos de guitarra con la flexibilidad de una HX Stomp y la simpleza de una pedalera compacta. Carga **capturas NAM** (incluida la arquitectura **A2**), **AIDA-X**, **GuitarML / Proteus** e **IRs** de gabinete, y tiene 17 efectos propios, dos caminos en paralelo, snapshots, looper, afinador y MIDI learn.
 
 ![ToneDeck](docs/screenshot.png)
 
 Formatos: **VST3** (Windows / macOS / Linux), **AU** (macOS), **CLAP**, **LV2** (Linux) y **aplicación Standalone**.
 
-## Cadena de señal
+## La pedalera
 
-```
-IN → NR (gate) → DRV (modelo de pedal) → AMP (modelo de ampli) → EQ → CAB (IR) → DLY → REV → MASTER
-```
+**Grilla de 2 × 8 celdas, hasta 16 bloques por preset.**
+- Fila de arriba = **camino A**. Fila de abajo = **camino B** en paralelo: la señal se divide antes del primer bloque de B y se vuelve a juntar después del último, en el nodo **M** (mezclador con nivel y paneo de cada camino). Ideal para dos amplis, dos gabinetes o un efecto en paralelo.
+- **Clic en una celda vacía** → agregar bloque. **Arrastrar** → mover (si la celda está ocupada, intercambia). **Doble clic** → on/off. **Clic derecho** → menú (cambiar tipo, cargar archivos, asignar a footswitch, quitar).
+- Las **6 perillas** controlan el bloque seleccionado; INPUT y MASTER son fijas.
 
-| Bloque | Qué carga / hace | Perillas |
-|---|---|---|
-| **NR** | Noise gate con histéresis, detecta sobre la señal limpia | Threshold, Release |
-| **DRV** | Segundo slot de modelo (captura de pedal: TS, Klon, fuzz…) | Drive, Level, Param 1/2*, Quality* |
-| **AMP** | Modelo principal `.nam` o `.json` | Gain, Volume, Param 1/2*, Quality* |
-| **EQ** | Tone stack post-ampli | Bass, Middle, Treble, Presence, Mid Freq |
-| **CAB** | IR `.wav/.aiff/.flac` (normalizada, re-muestreada automáticamente) | Low Cut, High Cut, Mix, Level |
-| **DLY** | Delay estéreo con repeticiones oscurecidas | Time, Feedback, Mix |
-| **REV** | Reverb estéreo | Size, Damping, Width, Mix |
+### Bloques
 
-\* Las perillas marcadas aparecen sólo si el modelo las admite: **Param 1/2** para modelos AIDA-X condicionados (entrada de 2 o 3 canales) y **Quality** para modelos NAM A2 "slimmable" (baja la calidad para ahorrar CPU).
+| Categoría | Bloques |
+|---|---|
+| Dinámica | Noise Gate, Compresor |
+| Drive | Clean Boost, Overdrive (tipo TS), Fuzz — con oversampling 2× |
+| Ampli / Gabinete | **Modelo** (NAM, NAM A2, AIDA-X, GuitarML/Proteus) · **Gabinete con 2 IR** (A/B con blend) |
+| EQ | Tone Stack, EQ paramétrico |
+| Modulación | Chorus, Flanger, Phaser, Trémolo |
+| Filtro | Wah (manual, auto-wah por envolvente o LFO) |
+| Delay / Reverb | Delay estéreo / ping-pong, Reverb con pre-delay (ambos con "trails": la cola sigue al apagarlos) |
+| Utilidad | Volumen / Paneo |
+
+En los modelos, las perillas PARAM 1/2 aparecen si el modelo es condicionado (AIDA-X/GuitarML) y QUALITY si es NAM A2.
+
+### Directo
+
+- **4 footswitches con 3 páginas** (botón `FS:`):
+  - **STOMP**: cada uno prende/apaga el bloque que le asignes (clic derecho en el footswitch), o hace tap tempo o abre el afinador.
+  - **SNAPSHOTS**: 4 variaciones por preset (on/off y perillas de todos los bloques) que cambian al instante. Se guardan solos al pasar de uno a otro.
+  - **LOOPER**: REC/PLAY/DUB, STOP, CLEAR, EXIT. Hasta 40 s.
+- **Afinador** (botón TUNER o un footswitch): silencia la salida mientras afinás.
+- **Tap tempo**: ajusta el tiempo de todos los delays del preset.
+- **MIDI learn**: clic derecho en cualquier perilla o footswitch → *MIDI Learn* y mové un control de tu controladora. **Program Change** carga presets.
 
 ## TONE3000
 

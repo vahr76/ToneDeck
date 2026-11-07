@@ -77,7 +77,8 @@ target_sources(ToneDeck PRIVATE
     Source/dsp/AidaEngine.cpp
     Source/ui/LcdDisplay.cpp
     Source/ui/PedalLookAndFeel.cpp
-    Source/online/Tone3000Client.cpp)
+    Source/online/Tone3000Client.cpp
+    Source/engine/Blocks.cpp)
 
 target_include_directories(ToneDeck PRIVATE Source)
 
@@ -141,7 +142,8 @@ if(TONEDECK_BUILD_TESTS)
         Source/dsp/AidaEngine.cpp
         Source/ui/LcdDisplay.cpp
         Source/ui/PedalLookAndFeel.cpp
-        Source/online/Tone3000Client.cpp)
+        Source/online/Tone3000Client.cpp
+        Source/engine/Blocks.cpp)
     target_include_directories(ToneDeckTests PRIVATE Source)
     target_compile_definitions(ToneDeckTests PRIVATE
         JucePlugin_Name="ToneDeck" JUCE_WEB_BROWSER=0 JUCE_USE_CURL=${TONEDECK_USE_CURL} JUCE_STANDALONE_APPLICATION=1 JUCE_MODAL_LOOPS_PERMITTED=1)

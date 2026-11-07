@@ -6,28 +6,36 @@
 #include "ui/PedalLookAndFeel.h"
 
 //==============================================================================
-// Chrome stomp switch with a status LED, bound to a block's on/off parameter.
+// Rotary knob with a right-click menu for MIDI learn.
+class LearnableKnob final : public juce::Slider
+{
+public:
+    LearnableKnob() = default;
+    std::function<int()> getMidiTarget;   // parameter index or ToneDeckProcessor::kNoTarget
+    ToneDeckProcessor* proc = nullptr;
+    void mouseDown (const juce::MouseEvent&) override;
+};
+
+//==============================================================================
+// Chrome stomp switch; label / LED come from the processor's current footswitch page.
 class Footswitch final : public juce::Component
 {
 public:
-    Footswitch (juce::RangedAudioParameter& param, juce::String label, juce::Colour ledColour);
-
-    std::function<void()> onPress;
-
+    Footswitch (ToneDeckProcessor& p, int index) : proc (p), fs (index) { setMouseCursor (juce::MouseCursor::PointingHandCursor); }
+    std::function<void (int fs)> onRightClick;
     void paint (juce::Graphics&) override;
     void mouseDown (const juce::MouseEvent&) override;
     void mouseUp (const juce::MouseEvent&) override { pressed = false; repaint(); }
-
 private:
-    juce::ParameterAttachment attachment;
-    juce::String text;
-    juce::Colour led;
-    bool state = false, pressed = false;
+    ToneDeckProcessor& proc;
+    const int fs;
+    bool pressed = false;
 };
 
 //==============================================================================
 class ToneDeckEditor final : public juce::AudioProcessorEditor,
-                             private juce::ChangeListener
+                             private juce::ChangeListener,
+                             private juce::Timer
 {
 public:
     explicit ToneDeckEditor (ToneDeckProcessor&);
@@ -37,6 +45,9 @@ public:
     void resized() override;
 
     static constexpr int baseW = 980, baseH = 660;
+    static constexpr int numKnobs = 6;
+
+    td::ui::LcdDisplay& getLcd() { return lcd; }   // for tests
 
 private:
     struct Body final : public juce::Component
@@ -46,36 +57,46 @@ private:
         ToneDeckEditor& owner;
     };
 
-    void changeListenerCallback (juce::ChangeBroadcaster*) override { refreshKnobs(); body.repaint(); }
-    void selectBlock (int b);
-    void toggleBlock (int b);
+    void changeListenerCallback (juce::ChangeBroadcaster*) override { refreshKnobs(); refreshButtons(); body.repaint(); }
+    void timerCallback() override;
+    void onCellSelected (int cell);
     void refreshKnobs();
-    void openFileChooser (int slot);
+    void refreshButtons();
+    void layoutBody();
+
+    void showAddMenu (int cell);
+    void showBlockMenu (int cell);
+    void showFootswitchMenu (int fs);
+    void addTypeItems (juce::PopupMenu& menu, int idBase, td::BlockType current);
+
+    void openFileChooser (int unit, int which);
     void stepFile (int delta);
     void chooseLibraryFolder();
     void savePresetDialog();
-    void layoutBody();
+    void routeFile (int cell, const juce::File& f);
+    int unitForFileKind (td::SlotKind kind);   // finds or creates an Amp / Cab unit
+
     void showTone3000Menu();
     void askClientId (std::function<void()> then);
-    void handleTone3000Result (const juce::Array<Tone3000Client::DownloadedModel>& models, const juce::String& error, int slot);
+    void handleTone3000Result (const juce::Array<Tone3000Client::DownloadedModel>& models, const juce::String& error);
     void showToneList (const juce::String& listName, const juce::String& title);
-    int currentFileSlot() const;
 
     ToneDeckProcessor& proc;
     td::ui::PedalLookAndFeel lnf;
     Body body { *this };
     td::ui::LcdDisplay lcd;
 
-    static constexpr int numKnobs = 5;
-    std::array<juce::Slider, numKnobs> knobs;
+    std::array<LearnableKnob, numKnobs> knobs;
     std::array<juce::String, numKnobs> knobLabels;
-    std::array<std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment>, numKnobs> knobAttachments;
-    juce::Slider inputKnob, masterKnob;
-    std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> inputAtt, masterAtt;
+    std::array<std::unique_ptr<juce::SliderParameterAttachment>, numKnobs> knobAttachments;
+    std::array<juce::RangedAudioParameter*, numKnobs> knobParams {};
+    LearnableKnob inputKnob, masterKnob;
+    std::unique_ptr<juce::SliderParameterAttachment> inputAtt, masterAtt;
+    int boundUnit = -999, boundSignature = -1;
 
-    juce::TextButton presetPrev { "< PRESET" }, presetNext { "PRESET >" }, presetSave { "SAVE" },
-                     loadBtn { "LOAD" }, filePrev { "<" }, fileNext { ">" }, libraryBtn { "LIBRARY" },
-                     ejectBtn { "EJECT" }, normBtn { "NORMALIZE" }, t3kBtn { "TONE3000" };
+    juce::TextButton presetPrev { "< PST" }, presetNext { "PST >" }, presetSave { "SAVE" }, t3kBtn { "TONE3000" },
+                     tunerBtn { "TUNER" }, looperBtn { "LOOPER" }, pageBtn { "FS: STOMP" },
+                     loadBtn { "LOAD" }, filePrev { "<" }, fileNext { ">" }, libraryBtn { "LIBRARY" }, normBtn { "NORM" };
     std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> normAtt;
 
     std::vector<std::unique_ptr<Footswitch>> footswitches;

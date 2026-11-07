@@ -72,11 +72,59 @@ std::string layerSummary (const nlohmann::json& j)
 }
 } // namespace
 
+// GuitarML / Proteus format: PyTorch state_dict of LSTM ("rec.*") + Linear ("lin.*"),
+// output = network(x) + x.
+static std::unique_ptr<ModelEngine> createGuitarMLEngine (const nlohmann::json& j, const std::string& fileStem, std::string& error)
+{
+    const auto& md = j.at ("model_data");
+    const auto& sd = j.at ("state_dict");
+    const int inSize  = md.value ("input_size", 1);
+    const int hidden  = md.value ("hidden_size", 0);
+    const auto unit   = md.value ("unit_type", std::string ("LSTM"));
+    if (inSize < 1 || inSize > 3 || hidden <= 0 || (unit != "LSTM" && unit != "GRU"))
+    {
+        error = "Unsupported GuitarML model (" + unit + ")";
+        return nullptr;
+    }
+
+    auto model = std::make_unique<RTNeural::Model<float>> (inSize);
+    namespace th = RTNeural::torch_helpers;
+    if (unit == "LSTM")
+    {
+        auto* lstm = new RTNeural::LSTMLayer<float> (inSize, hidden);
+        th::loadLSTM<float> (sd, "rec.", *lstm);
+        model->addLayer (lstm);
+    }
+    else
+    {
+        auto* gru = new RTNeural::GRULayer<float> (inSize, hidden);
+        th::loadGRU<float> (sd, "rec.", *gru);
+        model->addLayer (gru);
+    }
+    auto* dense = new RTNeural::Dense<float> (hidden, 1);
+    th::loadDense<float> (sd, "lin.", *dense);
+    model->addLayer (dense);
+    model->reset();
+
+    auto engine = std::make_unique<AidaEngine> (std::move (model), inSize, true, 1.0f, 1.0f);
+    auto& info = engine->info;
+    info.format                = "GuitarML";
+    info.architecture          = unit + " " + std::to_string (hidden);
+    info.displayName           = fileStem;
+    info.sampleRate            = 44100.0;   // Proteus / GuitarML captures are made at 44.1 kHz
+    if (md.contains ("sample_rate") && md["sample_rate"].is_number())
+        info.sampleRate = md["sample_rate"].get<double>();
+    info.numConditioningParams = inSize - 1;
+    return engine;
+}
+
 std::unique_ptr<ModelEngine> createAidaEngine (const std::string& jsonText, const std::string& fileStem, std::string& error)
 {
     try
     {
         const auto j = nlohmann::json::parse (jsonText);
+        if (j.contains ("state_dict") && j.contains ("model_data"))
+            return createGuitarMLEngine (j, fileStem, error);
         if (! j.contains ("layers") || ! j.contains ("in_shape"))
         {
             error = "Not an AIDA-X / RTNeural model (missing layers / in_shape)";
