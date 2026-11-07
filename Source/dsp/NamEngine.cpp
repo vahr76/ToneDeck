@@ -3,6 +3,13 @@
 #include <NAM/dsp.h>
 #include <NAM/get_dsp.h>
 #include <NAM/slimmable.h>
+#include <NAM/model_config.h>
+#include <NAM/linear.h>
+#include <NAM/lstm.h>
+#include <NAM/convnet.h>
+#include <NAM/container.h>
+#include <NAM/sequential.h>
+#include <NAM/wavenet/model.h>
 #include <json.hpp>
 
 #include <algorithm>
@@ -89,10 +96,35 @@ bool looksLikeA2 (const nlohmann::json& j)
 }
 } // namespace
 
+// NAM architectures register themselves through static objects. When the core ends up
+// inside a static library (as in plugin builds) the linker can drop those objects, so
+// register them explicitly here (this also forces the code to be linked in).
+static void ensureNamArchitecturesRegistered()
+{
+    static const bool done = []
+    {
+        auto& reg = nam::ConfigParserRegistry::instance();
+        const auto add = [&reg] (const char* name, nam::ConfigParserFunction f)
+        {
+            if (! reg.has (name))
+                reg.registerParser (name, std::move (f));
+        };
+        add ("WaveNet",            nam::wavenet::create_config);
+        add ("LSTM",               nam::lstm::create_config);
+        add ("ConvNet",            nam::convnet::create_config);
+        add ("Linear",             nam::linear::create_config);
+        add ("SlimmableContainer", nam::container::create_config);
+        add ("Sequential",         nam::sequential::create_config);
+        return true;
+    }();
+    (void) done;
+}
+
 std::unique_ptr<ModelEngine> createNamEngine (const std::string& jsonText, const std::string& fileStem, std::string& error)
 {
     try
     {
+        ensureNamArchitecturesRegistered();
         const auto j = nlohmann::json::parse (jsonText);
         auto dsp = nam::get_dsp (j);
         if (dsp == nullptr)
