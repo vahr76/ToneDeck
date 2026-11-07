@@ -125,6 +125,47 @@ int main (int argc, char* argv[])
     }
 
     const File outDir (argv[1]);
+
+    // --- Does loading a model / IR actually change the sound? (output vs. bypass)
+    {
+        auto runOnce = [&] (bool ampOn, bool cabOn, const File& irFile, const File& modelFile)
+        {
+            ToneDeckProcessor p;
+            p.setPlayConfigDetails (2, 2, 48000.0, 512);
+            p.prepareToPlay (48000.0, 512);
+            p.loadFile (td::Amp, modelFile);
+            if (irFile.existsAsFile()) p.loadFile (td::Cab, irFile);
+            waitLoaded (p, td::Amp);
+            setParam (p, "amp_on", ampOn ? 1.0f : 0.0f);
+            setParam (p, "cab_on", cabOn ? 1.0f : 0.0f);
+            setParam (p, "gate_on", 0.0f);
+            setParam (p, "eq_on", 0.0f);
+            for (int i = 0; i < 20; ++i) { AudioBuffer<float> b (2, 512); b.clear(); MidiBuffer m; p.processBlock (b, m); pump (5); }
+            auto in = makeGuitar (48000.0, 1.0);
+            AudioBuffer<float> io (in);
+            MidiBuffer midi;
+            for (int pos = 0; pos < io.getNumSamples(); pos += 512)
+            {
+                AudioBuffer<float> view (io.getArrayOfWritePointers(), 2, pos, jmin (512, io.getNumSamples() - pos));
+                p.processBlock (view, midi);
+            }
+            return io;
+        };
+        const File model (String::fromUTF8 (argv[2]));
+        auto irF = File (String::fromUTF8 (argv[1])).getChildFile ("test_cab_ir.wav");
+        auto dryOut = runOnce (false, false, irF, model);
+        auto ampOut = runOnce (true, false, irF, model);
+        auto cabOut = runOnce (false, true, irF, model);
+        auto diff = [] (const AudioBuffer<float>& a, const AudioBuffer<float>& b)
+        {
+            double d = 0, e = 0;
+            for (int i = 0; i < a.getNumSamples(); ++i) { const double x = a.getSample (0, i) - b.getSample (0, i); d += x * x; e += (double) a.getSample (0, i) * a.getSample (0, i); }
+            return std::sqrt (d / jmax (1e-12, e));
+        };
+        const double dAmp = diff (dryOut, ampOut), dCab = diff (dryOut, cabOut);
+        std::cout << "difference vs bypass: amp=" << dAmp << " cab=" << dCab << "\n";
+        failures += (dAmp > 0.05 ? 0 : 1) + (dCab > 0.05 ? 0 : 1);
+    }
     outDir.createDirectory();
     const auto ir = makeIR (outDir);
 
