@@ -117,7 +117,7 @@ inline const BlockInfo& blockInfo (BlockType t)
           { P { "DRIVE", 0, 1, 0.4f }, P { "TONE", 0, 1, 0.5f }, P { "LEVEL", -24, 12, 0, Fmt::Db }, P { "MIX", 0, 1, 1 } } },
         { "FUZ", "FUZZ", Category::Drive, col::drv,
           { P { "FUZZ", 0, 1, 0.6f }, P { "TONE", 0, 1, 0.5f }, P { "LEVEL", -24, 12, -6, Fmt::Db }, P { "GATE", 0, 1, 0.2f } } },
-        { "AMP", "MODEL (NAM / AIDA-X / GuitarML)", Category::AmpCab, col::amp,
+        { "CAP", "CAPTURE (NAM / AIDA-X / GuitarML)", Category::AmpCab, col::amp,
           { P { "GAIN", -24, 24, 0, Fmt::Db }, P { "VOLUME", -24, 24, 0, Fmt::Db },
             P { "PARAM 1", 0, 1, 0.5f }, P { "PARAM 2", 0, 1, 0.5f }, P { "QUALITY", 0, 1, 1 } }, true },
         { "CAB", "CABINET IR (A/B)", Category::AmpCab, col::cab,
@@ -167,6 +167,56 @@ inline const char* categoryName (Category c)
         case Category::Utility:    return "Utilidad";
     }
     return "";
+}
+
+// Capture gear (from NAM metadata "gear_type" or TONE3000 "gear") ---------------
+enum class Gear { Unknown, Pedal, Amp, Rig, Outboard };
+
+inline Gear gearFromString (const juce::String& raw)
+{
+    const auto g = raw.toLowerCase().replace ("-", "_").trim();
+    if (g.isEmpty()) return Gear::Unknown;
+    if (g == "pedal") return Gear::Pedal;
+    if (g == "outboard" || g == "studio") return Gear::Outboard;
+    if (g == "amp" || g == "preamp" || g == "pedal_amp" || g == "amp_pedal") return Gear::Amp;
+    if (g.contains ("cab") || g == "full_rig") return Gear::Rig;
+    return Gear::Unknown;
+}
+
+inline const char* gearShortName (Gear g)
+{
+    switch (g)
+    {
+        case Gear::Pedal:    return "PED";
+        case Gear::Amp:      return "AMP";
+        case Gear::Rig:      return "RIG";
+        case Gear::Outboard: return "OUT";
+        case Gear::Unknown:  break;
+    }
+    return "CAP";
+}
+
+inline const char* gearLongName (Gear g)
+{
+    switch (g)
+    {
+        case Gear::Pedal:    return "CAPTURE - PEDAL";
+        case Gear::Amp:      return "CAPTURE - AMP";
+        case Gear::Rig:      return "CAPTURE - AMP + CAB";
+        case Gear::Outboard: return "CAPTURE - OUTBOARD";
+        case Gear::Unknown:  break;
+    }
+    return "CAPTURE";
+}
+
+// Captures can't reproduce time-varying effects; warn when a name suggests one.
+inline juce::String timeBasedEffectIn (const juce::String& text)
+{
+    const auto t = text.toLowerCase();
+    for (auto* k : { "chorus", "flanger", "phaser", "phase 90", "tremolo", "vibrato", "univibe", "uni-vibe", "rotary",
+                     "leslie", "delay", "echo", "reverb", "wah", "octave", "pitch", "harmonizer", "whammy" })
+        if (t.contains (k)) return k;
+    return {};
 }
 
 // Parameter IDs ----------------------------------------------------------------

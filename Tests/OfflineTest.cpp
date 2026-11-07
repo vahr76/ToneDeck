@@ -333,6 +333,47 @@ int main (int argc, char* argv[])
         check (p->isUnitOn (dly) != before, "MIDI learn: CC64 -> footswitch 2 toggles delay");
     }
 
+    // --- gear-aware capture placement (pedal before amp), naming, warnings
+    {
+        // make a "pedal" and an "amp" capture from the first model by rewriting gear_type
+        auto json = models.getFirst().loadFileAsString();
+        const auto withGear = [&] (const String& g)
+        {
+            if (json.contains ("\"gear_type\"")) return json.replace ("\"gear_type\": \"amp\"", "\"gear_type\": \"" + g + "\"");
+            return json.replaceFirstOccurrenceOf ("{", "{\"metadata\": {\"gear_type\": \"" + g + "\"}, ");
+        };
+        const auto pedalFile = outDir.getChildFile ("TS808 Chorus capture.nam");
+        const auto ampFile   = outDir.getChildFile ("Plexi capture.nam");
+        pedalFile.replaceWithText (withGear ("pedal"));
+        ampFile.replaceWithText (withGear ("amp"));
+        check (ToneDeckProcessor::peekGear (pedalFile) == "pedal" && ToneDeckProcessor::peekGear (ampFile) == "amp", "read gear_type from .nam metadata");
+
+        auto p = makeProc (48000, 256);
+        std::unique_ptr<AudioProcessorEditor> ed (p->createEditor());
+        auto* tde = dynamic_cast<ToneDeckEditor*> (ed.get());
+        const int ampUnit = p->findUnitOfType (BlockType::Amp);
+        const int ampCellBefore = p->cellOfUnit (ampUnit);
+
+        tde->routeFile (-1, ampFile, {}, true);
+        waitModel (*p, ampUnit);
+        check (p->getUnit (ampUnit).files[0].loaded && p->unitShortName (ampUnit) == "AMP", "amp capture goes into the AMP slot and is labelled AMP");
+
+        tde->routeFile (-1, pedalFile, {}, true);
+        const int pedCell = Layout::index (0, ampCellBefore);
+        const int pedUnit = p->unitAtCell (pedCell);
+        waitModel (*p, pedUnit);
+        check (pedUnit >= 0 && pedUnit != ampUnit && p->unitShortName (pedUnit) == "PED" && p->cellOfUnit (ampUnit) == ampCellBefore + 1,
+               "pedal capture is inserted before the amp (amp shifts right), labelled PED");
+        check (p->getOnlineMessage().contains ("CHORUS") && p->getOnlineMessage().contains ("CHO"), "warning for a chorus capture suggests the CHO block");
+
+        tde->routeFile (-1, pedalFile, "pedal", true);
+        check (p->unitAtCell (pedCell) == pedUnit && p->cellOfUnit (ampUnit) == ampCellBefore + 1, "a second pedal capture replaces the pedal slot (no duplicate)");
+
+        tde->routeFile (-1, ampFile, "amp-cab", true);
+        waitModel (*p, ampUnit);
+        check (p->unitShortName (ampUnit) == "RIG", "TONE3000 gear amp-cab -> RIG label");
+    }
+
     // --- full state round trip: layout, types, files, snapshots, footswitches, MIDI
     {
         auto p = makeProc (48000, 256);

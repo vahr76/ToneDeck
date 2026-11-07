@@ -389,10 +389,16 @@ void LcdDisplay::drawGrid (Graphics& g)
         if (sel) { g.setColour (Colours::white); g.drawRoundedRectangle (rect.expanded (2.5f), 8.0f, 1.3f); }
 
         const Colour ink = isOn ? Colour (0xff081018) : col.withAlpha (0.85f);
-        drawBlockIcon (g, st.type, rect.reduced (rect.getWidth() * 0.3f, 7.0f).withTrimmedBottom (12.0f), ink);
+        auto iconType = st.type;
+        if (st.type == BlockType::Amp)
+        {
+            const auto gear = proc.unitGear (u);
+            iconType = gear == Gear::Pedal || gear == Gear::Outboard ? BlockType::Overdrive : (gear == Gear::Rig ? BlockType::Cab : BlockType::Amp);
+        }
+        drawBlockIcon (g, iconType, rect.reduced (rect.getWidth() * 0.3f, 7.0f).withTrimmedBottom (12.0f), ink);
         g.setColour (ink);
         g.setFont (lcdFont (11.0f, true));
-        g.drawText (info.shortName, rect.withTrimmedTop (rect.getHeight() - 15.0f), Justification::centred);
+        g.drawText (proc.unitShortName (u), rect.withTrimmedTop (rect.getHeight() - 15.0f), Justification::centred);
 
         if (st.files[0].loading)
         {
@@ -419,7 +425,7 @@ void LcdDisplay::drawGrid (Graphics& g)
             g.setColour (Colours::white);
             g.drawRoundedRectangle (ghost, 6.0f, 1.5f);
             g.setFont (lcdFont (11.0f, true));
-            g.drawText (info.shortName, ghost, Justification::centred);
+            g.drawText (proc.unitShortName (u), ghost, Justification::centred);
             const int target = cellAt (dragPos);
             if (target >= 0)
             {
@@ -528,7 +534,7 @@ void LcdDisplay::drawDetail (Graphics& g)
     auto title = left.removeFromTop (20.0f);
     g.setColour (c);
     g.setFont (lcdFont (15.0f, true));
-    const String name = info.longName;
+    const String name = proc.unitLongName (u);
     g.drawText (name, title.removeFromLeft (jmin (title.getWidth() - 50.0f, 330.0f)), Justification::centredLeft, true);
     auto pill = title.removeFromRight (44.0f).reduced (0.0f, 2.0f);
     g.setColour (isOn ? c : Colour (0xff2a3346));

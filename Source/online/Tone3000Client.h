@@ -22,7 +22,7 @@ public:
     struct DownloadedModel
     {
         juce::File file;
-        juce::String toneTitle, modelName;
+        juce::String toneTitle, modelName, gear;   // gear: amp, amp-cab, pedal, outboard...
     };
 
     using ListCallback     = std::function<void (juce::Array<ToneItem>, juce::String error)>;

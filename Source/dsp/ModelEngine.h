@@ -14,6 +14,7 @@ struct ModelInfo
     std::string architecture;  // "WaveNet", "LSTM", "GRU" ...
     std::string displayName;   // name from metadata or file name
     std::string author;        // metadata if present
+    std::string gearType;      // NAM metadata gear_type: amp, pedal, amp_cab, pedal_amp...
     double sampleRate = 48000.0;  // rate the model was trained at
     bool arbitrarySampleRate = false;
     bool hasLoudness = false;

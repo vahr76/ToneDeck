@@ -19,14 +19,18 @@ Formatos: **VST3** (Windows / macOS / Linux), **AU** (macOS), **CLAP**, **LV2** 
 |---|---|
 | Dinámica | Noise Gate, Compresor |
 | Drive | Clean Boost, Overdrive (tipo TS), Fuzz — con oversampling 2× |
-| Ampli / Gabinete | **Modelo** (NAM, NAM A2, AIDA-X, GuitarML/Proteus) · **Gabinete con 2 IR** (A/B con blend) |
+| Ampli / Gabinete | **Capture** (NAM, NAM A2, AIDA-X, GuitarML/Proteus) · **Gabinete con 2 IR** (A/B con blend) |
 | EQ | Tone Stack, EQ paramétrico |
 | Modulación | Chorus, Flanger, Phaser, Trémolo |
 | Filtro | Wah (manual, auto-wah por envolvente o LFO) |
 | Delay / Reverb | Delay estéreo / ping-pong, Reverb con pre-delay (ambos con "trails": la cola sigue al apagarlos) |
 | Utilidad | Volumen / Paneo |
 
-En los modelos, las perillas PARAM 1/2 aparecen si el modelo es condicionado (AIDA-X/GuitarML) y QUALITY si es NAM A2.
+El bloque **CAPTURE** carga cualquier modelo y se rotula según el equipo capturado (dato de TONE3000 o `gear_type` del archivo .nam): **PED** pedal, **AMP** ampli, **RIG** ampli + gabinete, **OUT** outboard. Al cargar desde TONE3000 o la biblioteca, las capturas de pedal se ubican solas antes del ampli (corriendo la cadena) y las de ampli reemplazan al ampli. Si soltás el archivo sobre una celda concreta, va ahí.
+
+Las capturas no reproducen efectos que se mueven en el tiempo (chorus, flanger, phaser, trémolo, delay, reverb, wah): sólo el color y la saturación del equipo. El plugin avisa cuando el nombre lo sugiere y propone el bloque equivalente.
+
+En las capturas, las perillas PARAM 1/2 aparecen si el modelo es condicionado (AIDA-X/GuitarML) y QUALITY si es NAM A2.
 
 ### Directo
 

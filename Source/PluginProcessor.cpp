@@ -400,6 +400,67 @@ void ToneDeckProcessor::resetToDefaultRig()
     sendChangeMessage();
 }
 
+int ToneDeckProcessor::insertBlock (int cell, BlockType type)
+{
+    if (! juce::isPositiveAndBelow (cell, kGridCells)) return -1;
+    if (layout.cell[(size_t) cell] < 0) return addBlock (cell, type);
+
+    // shift this row right from `cell` into the first free slot after it
+    const int row = cell / kGridCols, col = cell % kGridCols;
+    int freeCol = -1;
+    for (int c = col + 1; c < kGridCols; ++c)
+        if (layout.at (row, c) < 0) { freeCol = c; break; }
+    if (freeCol < 0)
+    {
+        for (int c = col - 1; c >= 0; --c)   // or use a free slot just before it
+            if (layout.at (row, c) < 0) return addBlock (Layout::index (row, c), type);
+        setOnlineMessage ("No hay lugar en esta fila para otro bloque");
+        return -1;
+    }
+    for (int c = freeCol; c > col; --c)
+        layout.cell[(size_t) Layout::index (row, c)] = layout.cell[(size_t) Layout::index (row, c - 1)];
+    layout.cell[(size_t) cell] = -1;
+    return addBlock (cell, type);
+}
+
+td::Gear ToneDeckProcessor::unitGear (int unit) const
+{
+    const auto& st = getUnit (unit);
+    return st.type == BlockType::Amp ? gearFromString (st.files[0].gear) : Gear::Unknown;
+}
+
+juce::String ToneDeckProcessor::unitShortName (int unit) const
+{
+    const auto& st = getUnit (unit);
+    return st.type == BlockType::Amp ? juce::String (gearShortName (unitGear (unit))) : juce::String (blockInfo (st.type).shortName);
+}
+
+juce::String ToneDeckProcessor::unitLongName (int unit) const
+{
+    const auto& st = getUnit (unit);
+    return st.type == BlockType::Amp ? juce::String (gearLongName (unitGear (unit))) : juce::String (blockInfo (st.type).longName);
+}
+
+juce::String ToneDeckProcessor::peekGear (const juce::File& f)
+{
+    // cheap look into the first part of a .nam file's metadata
+    // metadata may sit before or after the weights: look at both ends
+    juce::FileInputStream in (f);
+    if (! in.openedOk()) return {};
+    juce::MemoryBlock head, tail;
+    in.readIntoMemoryBlock (head, 8192);
+    if (in.getTotalLength() > 16384)
+    {
+        in.setPosition (in.getTotalLength() - 8192);
+        in.readIntoMemoryBlock (tail, 8192);
+    }
+    const auto text = head.toString() + " " + tail.toString();
+    const auto pos = text.indexOf ("\"gear_type\"");
+    if (pos < 0) return {};
+    const auto rest = text.substring (pos + 11).fromFirstOccurrenceOf ("\"", false, false);
+    return rest.upToFirstOccurrenceOf ("\"", false, false);
+}
+
 juce::RangedAudioParameter* ToneDeckProcessor::unitParam (int unit, int i) const
 {
     return juce::isPositiveAndBelow (unit, kNumUnits) ? apvts.getParameter (unitParamId (unit, i)) : nullptr;
@@ -444,7 +505,7 @@ void ToneDeckProcessor::clearUnitFile (int unit, int which)
     sendChangeMessage();
 }
 
-void ToneDeckProcessor::loadUnitFile (int unit, int which, const juce::File& file)
+void ToneDeckProcessor::loadUnitFile (int unit, int which, const juce::File& file, const juce::String& gearHint)
 {
     if (! juce::isPositiveAndBelow (unit, kNumUnits)) return;
     auto& st = unitStates[(size_t) unit].files[(size_t) which];
@@ -493,6 +554,7 @@ void ToneDeckProcessor::loadUnitFile (int unit, int which, const juce::File& fil
     st.error.clear();
     st.file = file;
     st.name = file.getFileNameWithoutExtension();
+    st.gear = gearHint.isNotEmpty() ? gearHint : peekGear (file);
     sendChangeMessage();
 
     const int gen      = ++loadGeneration[(size_t) unit];
@@ -502,7 +564,7 @@ void ToneDeckProcessor::loadUnitFile (int unit, int which, const juce::File& fil
     const double size  = qp != nullptr ? qp->getValue() : 1.0;
     juce::WeakReference<ToneDeckProcessor> weak (this);
 
-    loaderPool.addJob ([weak, unit, file, gen, rate, block, size]
+    loaderPool.addJob ([weak, unit, file, gen, rate, block, size, gearHint]
     {
         const auto text = file.loadFileAsString().toStdString();
         const auto stem = file.getFileNameWithoutExtension().toStdString();
@@ -547,6 +609,7 @@ void ToneDeckProcessor::loadUnitFile (int unit, int which, const juce::File& fil
             result.hasLoudness        = info.hasLoudness;
             result.loudness           = info.loudnessDb;
             result.conditioningParams = info.numConditioningParams;
+            result.gear               = gearHint.isNotEmpty() ? gearHint : toStd (info.gearType);
         }
         else
         {
@@ -650,7 +713,7 @@ juce::String ToneDeckProcessor::footswitchLabel (int fs) const
         case FsPage::Stomp:
         {
             const auto& a = fsAssign[(size_t) fs];
-            if (a.kind == FootswitchAssign::ToggleUnit && a.unit >= 0) return blockInfo (getUnit (a.unit).type).shortName;
+            if (a.kind == FootswitchAssign::ToggleUnit && a.unit >= 0) return unitShortName (a.unit);
             if (a.kind == FootswitchAssign::TapTempo) return "TAP " + juce::String (juce::roundToInt (bpm));
             if (a.kind == FootswitchAssign::Tuner) return "TUNER";
             return "---";
@@ -957,6 +1020,8 @@ juce::ValueTree ToneDeckProcessor::createStateTree()
         for (int f = 0; f < 3; ++f)
             if (st.files[(size_t) f].file != juce::File())
                 ut.setProperty ("file" + juce::String (f), st.files[(size_t) f].file.getFullPathName(), nullptr);
+        if (st.files[0].gear.isNotEmpty())
+            ut.setProperty ("gear", st.files[0].gear, nullptr);
         rigTree.appendChild (ut, nullptr);
     }
     tree.appendChild (rigTree, nullptr);
@@ -1008,12 +1073,14 @@ void ToneDeckProcessor::restoreFromTree (const juce::ValueTree& tree)
     // rebuild blocks first (types), then parameter values from the tree
     std::array<int, kNumUnits> types {};
     std::array<juce::StringArray, kNumUnits> files;
+    std::array<juce::String, kNumUnits> gears;
     for (const auto& ut : rigTree)
     {
         const int u = ut.getProperty ("index", -1);
         if (! juce::isPositiveAndBelow (u, kNumUnits)) continue;
         types[(size_t) u] = ut.getProperty ("type", 0);
         for (int f = 0; f < 3; ++f) files[(size_t) u].add (ut.getProperty ("file" + juce::String (f)).toString());
+        gears[(size_t) u] = ut.getProperty ("gear").toString();
     }
 
     layout = {};
@@ -1059,7 +1126,7 @@ void ToneDeckProcessor::restoreFromTree (const juce::ValueTree& tree)
     }
 
     juce::WeakReference<ToneDeckProcessor> weak (this);
-    juce::MessageManager::callAsync ([weak, files, types]
+    juce::MessageManager::callAsync ([weak, files, types, gears]
     {
         auto* self = weak.get();
         if (self == nullptr) return;
@@ -1071,7 +1138,7 @@ void ToneDeckProcessor::restoreFromTree (const juce::ValueTree& tree)
                 const auto path = files[(size_t) u][f];
                 const bool relevant = (t == BlockType::Amp && f == 0) || (t == BlockType::Cab && f > 0);
                 if (relevant && path.isNotEmpty() && juce::File::isAbsolutePath (path))
-                    self->loadUnitFile (u, f, juce::File (path));
+                    self->loadUnitFile (u, f, juce::File (path), f == 0 ? gears[(size_t) u] : juce::String());
             }
         }
         self->sendChangeMessage();

@@ -411,6 +411,7 @@ juce::Array<Tone3000Client::DownloadedModel> Tone3000Client::downloadModels (con
     juce::String titleError;
     const auto tone = apiGet ("/tones/" + juce::URL::addEscapeChars (toneId, true), titleError);
     const auto title = tone["title"].toString().isNotEmpty() ? tone["title"].toString() : "tone-" + toneId;
+    const auto gear  = tone["gear"].toString();
 
     const auto list = apiGet ("/models?tone_id=" + juce::URL::addEscapeChars (toneId, true) + "&page_size=300", error);
     if (error.isNotEmpty()) return out;
@@ -477,7 +478,7 @@ juce::Array<Tone3000Client::DownloadedModel> Tone3000Client::downloadModels (con
         }
         const auto target = dir.getChildFile ((id.isNotEmpty() ? id + "-" : juce::String()) + safeName (name) + ext);
         if (target.replaceWithData (data.getData(), data.getSize()))
-            out.add ({ target, title, name });
+            out.add ({ target, title, name, gear });
     }
 
     if (out.isEmpty())

@@ -153,6 +153,7 @@ std::unique_ptr<ModelEngine> createNamEngine (const std::string& jsonText, const
         // The file name is usually the most descriptive label (TONE3000 downloads etc.)
         info.displayName = fileStem.empty() ? metaString (j, "name") : fileStem;
         info.author      = metaString (j, "modeled_by");
+        info.gearType    = metaString (j, "gear_type");
         return engine;
     }
     catch (const std::exception& e)

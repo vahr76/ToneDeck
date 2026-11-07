@@ -49,6 +49,10 @@ public:
 
     td::ui::LcdDisplay& getLcd() { return lcd; }   // for tests
 
+    // Load a file into the rig: explicit cell, or auto-placed by gear (pedals before the amp).
+    void routeFile (int cell, const juce::File& f, const juce::String& gearHint = {}, bool autoPlace = false,
+                    const juce::String& extraName = {});
+
 private:
     struct Body final : public juce::Component
     {
@@ -73,8 +77,8 @@ private:
     void stepFile (int delta);
     void chooseLibraryFolder();
     void savePresetDialog();
-    void routeFile (int cell, const juce::File& f);
-    int unitForFileKind (td::SlotKind kind);   // finds or creates an Amp / Cab unit
+    int unitForFileKind (td::SlotKind kind);   // finds or creates a capture / cab unit
+    int captureUnitFor (td::Gear gear);        // places pedals before the amp, amps after pedals
 
     void showTone3000Menu();
     void askClientId (std::function<void()> then);

@@ -297,7 +297,7 @@ void ToneDeckEditor::Body::paint (Graphics& g)
     else if (const int u = owner.proc.unitAtCell (sel); u >= 0)
     {
         const auto& info = blockInfo (owner.proc.getUnit (u).type);
-        tag = String ("EDIT  >  ") + info.longName;
+        tag = String ("EDIT  >  ") + owner.proc.unitLongName (u);
         tagCol = Colour (info.colour);
     }
     g.setColour (tagCol);
@@ -428,7 +428,7 @@ void ToneDeckEditor::showBlockMenu (int cell)
     const auto& st = proc.getUnit (u);
     const auto& info = blockInfo (st.type);
     PopupMenu m;
-    m.addSectionHeader (info.longName);
+    m.addSectionHeader (proc.unitLongName (u));
     m.addItem (1, proc.isUnitOn (u) ? "Apagar (bypass)" : "Encender");
     if (info.usesModelFile)
     {
@@ -479,7 +479,7 @@ void ToneDeckEditor::showFootswitchMenu (int fs)
         const int u = proc.unitAtCell (c);
         if (u < 0) continue;
         const auto& info = blockInfo (proc.getUnit (u).type);
-        m.addItem (100 + u, String ("Encender/apagar ") + info.shortName + "  (" + (c >= kGridCols ? "B" : "A") + String (c % kGridCols + 1) + ")",
+        m.addItem (100 + u, String ("Encender/apagar ") + proc.unitShortName (u) + "  (" + (c >= kGridCols ? "B" : "A") + String (c % kGridCols + 1) + ")",
                    true, a.kind == FootswitchAssign::ToggleUnit && a.unit == u);
     }
     m.addSeparator();
@@ -515,19 +515,74 @@ int ToneDeckEditor::unitForFileKind (SlotKind kind)
     return -1;
 }
 
-void ToneDeckEditor::routeFile (int cell, const File& f)
+int ToneDeckEditor::captureUnitFor (Gear gear)
+{
+    const bool pedalLike = gear == Gear::Pedal || gear == Gear::Outboard;
+    int firstPedal = -1, lastPedalCell = -1, firstAmpCell = -1;
+    for (int c = 0; c < kGridCells; ++c)
+    {
+        const int u = proc.unitAtCell (c);
+        if (u < 0 || proc.getUnit (u).type != BlockType::Amp) continue;
+        const auto g = proc.unitGear (u);
+        const bool isPedal = g == Gear::Pedal || g == Gear::Outboard;
+        if (isPedal) { if (firstPedal < 0) firstPedal = u; lastPedalCell = c; }
+        else if (firstAmpCell < 0) firstAmpCell = c;
+    }
+
+    if (pedalLike)
+    {
+        if (firstPedal >= 0) return firstPedal;                                  // replace the pedal capture
+        if (firstAmpCell >= 0) return proc.insertBlock (firstAmpCell, BlockType::Amp);   // new one right before the amp
+        return proc.insertBlock (Layout::index (0, 1), BlockType::Amp);         // no amp yet: after the gate
+    }
+
+    if (firstAmpCell >= 0) return proc.unitAtCell (firstAmpCell);                // replace the amp capture
+    if (lastPedalCell >= 0 && lastPedalCell % kGridCols < kGridCols - 1)
+        return proc.insertBlock (lastPedalCell + 1, BlockType::Amp);            // amp goes after the pedals
+    return unitForFileKind (SlotKind::Model);
+}
+
+void ToneDeckEditor::routeFile (int cell, const File& f, const String& gearHint, bool autoPlace, const String& extraName)
 {
     const auto kind = ToneDeckProcessor::kindForFile (f);
     if (kind == SlotKind::None) return;
-    const auto wanted = kind == SlotKind::IR ? BlockType::Cab : BlockType::Amp;
-    int u = proc.unitAtCell (cell);
 
-    if (cell >= 0 && u < 0) u = proc.addBlock (cell, wanted);              // dropped on an empty cell
-    else if (u >= 0 && proc.getUnit (u).type != wanted) u = unitForFileKind (kind);
-    else if (u < 0) u = unitForFileKind (kind);
-    if (u < 0) return;
+    int u = -1;
+    if (kind == SlotKind::IR)
+    {
+        u = proc.unitAtCell (cell);
+        if (cell >= 0 && u < 0 && ! autoPlace) u = proc.addBlock (cell, BlockType::Cab);
+        else if (u < 0 || proc.getUnit (u).type != BlockType::Cab) u = unitForFileKind (kind);
+        if (u < 0) return;
+        proc.loadUnitFile (u, 1, f);   // IR B: via the block's menu or its file box
+    }
+    else
+    {
+        const auto gearStr = gearHint.isNotEmpty() ? gearHint : ToneDeckProcessor::peekGear (f);
+        if (! autoPlace && cell >= 0)
+        {
+            const int target = proc.unitAtCell (cell);
+            if (target < 0) u = proc.addBlock (cell, BlockType::Amp);               // dropped on an empty cell
+            else if (proc.getUnit (target).type == BlockType::Amp) u = target;       // explicit capture block
+        }
+        if (u < 0) u = captureUnitFor (gearFromString (gearStr));
+        if (u < 0) return;
+        proc.loadUnitFile (u, 0, f, gearStr);
 
-    proc.loadUnitFile (u, kind == SlotKind::IR ? 1 : 0, f);   // IR B: via the block's menu or its file box
+        // captures are static: a chorus/delay/... capture won't modulate or echo
+        const auto effect = timeBasedEffectIn (f.getFileNameWithoutExtension() + " " + extraName);
+        if (effect.isNotEmpty())
+        {
+            const std::map<String, String> suggestion {
+                { "chorus", "CHO" }, { "flanger", "FLG" }, { "phaser", "PHA" }, { "phase 90", "PHA" }, { "tremolo", "TRM" },
+                { "vibrato", "TRM" }, { "univibe", "PHA" }, { "uni-vibe", "PHA" }, { "rotary", "CHO" }, { "leslie", "CHO" },
+                { "delay", "DLY" }, { "echo", "DLY" }, { "reverb", "REV" }, { "wah", "WAH" } };
+            const auto it = suggestion.find (effect);
+            proc.setOnlineMessage ("AVISO: una captura no reproduce el efecto " + effect.toUpperCase()
+                                   + " (solo su color/saturacion)." + (it != suggestion.end() ? " Para el efecto usa el bloque " + it->second + "." : String()));
+        }
+    }
+
     const int c = proc.cellOfUnit (u);
     if (! lcd.isShowingLibrary()) lcd.setSelection (c);
     onCellSelected (c);
@@ -690,8 +745,8 @@ void ToneDeckEditor::handleTone3000Result (const Array<Tone3000Client::Downloade
     if (models.isEmpty()) { proc.setOnlineMessage (error.isNotEmpty() ? error : String ("TONE3000: sin resultados")); return; }
     auto load = [this] (const Tone3000Client::DownloadedModel& m)
     {
-        routeFile (lcd.getSelection(), m.file);
         proc.setOnlineMessage ("TONE3000: cargado " + m.modelName);
+        routeFile (lcd.getSelection(), m.file, m.gear, true, m.toneTitle + " " + m.modelName);   // may replace the message with a warning
     };
     if (models.size() == 1) { load (models.getReference (0)); return; }
 
