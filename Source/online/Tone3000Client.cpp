@@ -8,7 +8,8 @@
 
 namespace
 {
-const juce::String apiBase = "https://www.tone3000.com/api/v1";
+const juce::String apiOrigin = "https://www.tone3000.com";
+const juce::String apiBase = apiOrigin + "/api/v1";
 constexpr int kHttpTimeoutMs   = 20000;
 constexpr int kBrowserWaitMs   = 5 * 60 * 1000;
 constexpr int kFirstPort       = 53917;   // loopback redirect port range
@@ -378,7 +379,10 @@ juce::var Tone3000Client::apiGet (const juce::String& pathAndQuery, juce::String
         if (sc == 429) { error = "TONE3000: demasiadas solicitudes, proba en un minuto"; return {}; }
         if (sc < 200 || sc >= 300)
         {
-            error = "TONE3000 respondio " + juce::String (sc);
+            const auto where = pathAndQuery.upToFirstOccurrenceOf ("?", false, false);
+            error = sc == 0 ? "TONE3000: sin conexion (" + where + ")"
+                            : "TONE3000 respondio " + juce::String (sc) + " en " + where
+                                  + (sc == 403 ? " (tu clave no tiene permiso para esto)" : sc == 404 ? " (no encontrado)" : "");
             return {};
         }
         return juce::JSON::parse (text);
@@ -403,8 +407,9 @@ juce::Array<Tone3000Client::DownloadedModel> Tone3000Client::downloadModels (con
     juce::Array<DownloadedModel> out;
     status ("TONE3000: buscando modelos...");
 
-    const auto tone  = apiGet ("/tones/" + juce::URL::addEscapeChars (toneId, true), error);
-    if (error.isNotEmpty()) return out;
+    // Tone title is only cosmetic: don't fail the download if this lookup is refused.
+    juce::String titleError;
+    const auto tone = apiGet ("/tones/" + juce::URL::addEscapeChars (toneId, true), titleError);
     const auto title = tone["title"].toString().isNotEmpty() ? tone["title"].toString() : "tone-" + toneId;
 
     const auto list = apiGet ("/models?tone_id=" + juce::URL::addEscapeChars (toneId, true) + "&page_size=300", error);
@@ -412,56 +417,71 @@ juce::Array<Tone3000Client::DownloadedModel> Tone3000Client::downloadModels (con
     const auto* models = list["data"].getArray();
     if (models == nullptr || models->isEmpty())
     {
-        error = "Ese tono no tiene modelos descargables";
+        error = "TONE3000: el tono " + toneId + " no tiene modelos descargables";
         return out;
     }
 
     const auto dir = getLibrary().getChildFile ("TONE3000").getChildFile (safeName (title));
     dir.createDirectory();
 
-    juce::String access;
-    {
-        const juce::ScopedLock sl (tokenLock);
-        access = tokens.access;
-    }
-
-    int index = 0;
+    int index = 0, lastStatus = 0;
     for (const auto& m : *models)
     {
         ++index;
         const auto modelUrl = m["model_url"].toString();
-        if (modelUrl.isEmpty())
-            continue;
+        if (modelUrl.isEmpty()) continue;
 
-        auto ext = juce::URL (modelUrl).getFileName().fromLastOccurrenceOf (".", true, false).toLowerCase();
-        if (ext.isEmpty() || ext.length() > 6) ext = ".nam";
+        // Like the official client: keep the path, always send it to the API origin with the
+        // Bearer token (a cross-host redirect would drop the Authorization header).
+        const juce::URL parsed (modelUrl);
+        const auto subPath = parsed.getSubPath();
+        const auto fileName = subPath.fromLastOccurrenceOf ("/", false, false);
+        auto ext = fileName.contains (".") ? "." + fileName.fromLastOccurrenceOf (".", false, false).toLowerCase() : juce::String();
         auto name = m["name"].toString();
         if (name.isEmpty()) name = title + " " + juce::String (index);
-        const auto target = dir.getChildFile (safeName (name) + ext);
+        const auto id = m["id"].toString();
 
-        if (! (target.existsAsFile() && target.getSize() > 0))
+        const juce::String query = modelUrl.containsChar ('?') ? "?" + modelUrl.fromFirstOccurrenceOf ("?", false, false) : juce::String();
+        const auto sameOrigin = modelUrl.startsWithIgnoreCase ("https://www.tone3000.com") || modelUrl.startsWithIgnoreCase ("https://tone3000.com")
+                                || modelUrl.startsWith ("/");
+        const auto requestUrl = sameOrigin ? apiOrigin + "/" + subPath + query : modelUrl;
+
+        status ("TONE3000: descargando " + name + " (" + juce::String (index) + "/" + juce::String (models->size()) + ")");
+        juce::MemoryBlock data;
+        for (int attempt = 0; attempt < 3 && data.isEmpty(); ++attempt)
         {
-            status ("TONE3000: descargando " + name + " (" + juce::String (index) + "/" + juce::String (models->size()) + ")");
-            juce::MemoryBlock data;
-            for (int withAuth = 1; withAuth >= 0 && data.isEmpty(); --withAuth)
+            juce::String access;
             {
-                int sc = 0;
-                auto opts = juce::URL::InputStreamOptions (juce::URL::ParameterHandling::inAddress)
-                                .withExtraHeaders (withAuth ? "Authorization: Bearer " + access : juce::String())
-                                .withConnectionTimeoutMs (kHttpTimeoutMs)
-                                .withStatusCode (&sc);
-                if (auto stream = juce::URL (modelUrl).createInputStream (opts))
-                    if (sc >= 200 && sc < 300)
-                        stream->readIntoMemoryBlock (data);
+                const juce::ScopedLock sl (tokenLock);
+                access = tokens.access;
             }
-            if (data.isEmpty() || ! target.replaceWithData (data.getData(), data.getSize()))
-                continue;
+            const bool withAuth = sameOrigin || attempt == 0;
+            int sc = 0;
+            auto opts = juce::URL::InputStreamOptions (juce::URL::ParameterHandling::inAddress)
+                            .withExtraHeaders (withAuth ? "Authorization: Bearer " + access : juce::String())
+                            .withConnectionTimeoutMs (kHttpTimeoutMs)
+                            .withNumRedirectsToFollow (5)
+                            .withStatusCode (&sc);
+            if (auto stream = juce::URL (attempt == 2 ? modelUrl : requestUrl).createInputStream (opts))
+                if (sc >= 200 && sc < 300)
+                    stream->readIntoMemoryBlock (data);
+            lastStatus = sc;
+            if (sc == 401 && attempt == 0) { juce::String e; refreshToken (e); }
         }
-        out.add ({ target, title, name });
+        if (data.isEmpty()) continue;
+
+        if (ext.isEmpty() || ext.length() > 6)   // sniff: RIFF = wav, JSON = model
+        {
+            const auto head = juce::String::fromUTF8 ((const char*) data.getData(), (int) juce::jmin ((size_t) 4096, data.getSize()));
+            ext = head.startsWith ("RIFF") ? ".wav" : (head.contains ("state_dict") || head.contains ("\"in_shape\"") ? ".json" : ".nam");
+        }
+        const auto target = dir.getChildFile ((id.isNotEmpty() ? id + "-" : juce::String()) + safeName (name) + ext);
+        if (target.replaceWithData (data.getData(), data.getSize()))
+            out.add ({ target, title, name });
     }
 
     if (out.isEmpty())
-        error = "No se pudo descargar ningun modelo";
+        error = "TONE3000: no se pudo descargar el modelo (HTTP " + juce::String (lastStatus) + ")";
     return out;
 }
 
