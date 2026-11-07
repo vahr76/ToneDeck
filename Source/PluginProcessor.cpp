@@ -423,6 +423,28 @@ int ToneDeckProcessor::insertBlock (int cell, BlockType type)
     return addBlock (cell, type);
 }
 
+void ToneDeckProcessor::autoCabForCapture (int unit)
+{
+    // A "RIG" capture (amp + cab) already contains the speaker: bypass the cab blocks that
+    // follow it in the same path. An "AMP" (head only) capture needs one: switch them back on.
+    const auto gear = unitGear (unit);
+    if (gear != Gear::Rig && gear != Gear::Amp) return;
+    const int cell = cellOfUnit (unit);
+    if (cell < 0) return;
+    const int row = cell / kGridCols;
+    int changed = 0;
+    for (int c = cell % kGridCols + 1; c < kGridCols; ++c)
+    {
+        const int u = layout.at (row, c);
+        if (u < 0 || unitStates[(size_t) u].type != BlockType::Cab) continue;
+        const bool wantOn = gear == Gear::Amp;
+        if (isUnitOn (u) != wantOn) { setParamPlain (unitOnParam (u), wantOn ? 1.0f : 0.0f); ++changed; }
+    }
+    if (changed > 0)
+        setOnlineMessage (gear == Gear::Rig ? "RIG (ampli + gabinete): CAB apagado para no tener dos parlantes"
+                                            : "AMP (solo cabezal): CAB encendido");
+}
+
 td::Gear ToneDeckProcessor::unitGear (int unit) const
 {
     const auto& st = getUnit (unit);
@@ -505,7 +527,7 @@ void ToneDeckProcessor::clearUnitFile (int unit, int which)
     sendChangeMessage();
 }
 
-void ToneDeckProcessor::loadUnitFile (int unit, int which, const juce::File& file, const juce::String& gearHint)
+void ToneDeckProcessor::loadUnitFile (int unit, int which, const juce::File& file, const juce::String& gearHint, bool autoCab)
 {
     if (! juce::isPositiveAndBelow (unit, kNumUnits)) return;
     auto& st = unitStates[(size_t) unit].files[(size_t) which];
@@ -564,7 +586,7 @@ void ToneDeckProcessor::loadUnitFile (int unit, int which, const juce::File& fil
     const double size  = qp != nullptr ? qp->getValue() : 1.0;
     juce::WeakReference<ToneDeckProcessor> weak (this);
 
-    loaderPool.addJob ([weak, unit, file, gen, rate, block, size, gearHint]
+    loaderPool.addJob ([weak, unit, file, gen, rate, block, size, gearHint, autoCab]
     {
         const auto text = file.loadFileAsString().toStdString();
         const auto stem = file.getFileNameWithoutExtension().toStdString();
@@ -616,7 +638,7 @@ void ToneDeckProcessor::loadUnitFile (int unit, int which, const juce::File& fil
             result.error = "ERROR AL CARGAR: " + toStd (err);
         }
 
-        juce::MessageManager::callAsync ([weak, unit, gen, result, inst]
+        juce::MessageManager::callAsync ([weak, unit, gen, result, inst, autoCab]
         {
             auto* self = weak.get();
             if (self == nullptr || gen != self->loadGeneration[(size_t) unit])
@@ -630,6 +652,8 @@ void ToneDeckProcessor::loadUnitFile (int unit, int which, const juce::File& fil
                 mb->slot.setInstance (std::move (*inst));
             }
             self->unitStates[(size_t) unit].files[0] = result;
+            if (result.loaded && autoCab)
+                self->autoCabForCapture (unit);
             self->sendChangeMessage();
         });
     });
@@ -1138,7 +1162,7 @@ void ToneDeckProcessor::restoreFromTree (const juce::ValueTree& tree)
                 const auto path = files[(size_t) u][f];
                 const bool relevant = (t == BlockType::Amp && f == 0) || (t == BlockType::Cab && f > 0);
                 if (relevant && path.isNotEmpty() && juce::File::isAbsolutePath (path))
-                    self->loadUnitFile (u, f, juce::File (path), f == 0 ? gears[(size_t) u] : juce::String());
+                    self->loadUnitFile (u, f, juce::File (path), f == 0 ? gears[(size_t) u] : juce::String(), false);   // keep saved cab state
             }
         }
         self->sendChangeMessage();

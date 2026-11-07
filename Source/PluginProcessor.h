@@ -82,12 +82,13 @@ public:
     void resetToDefaultRig();
     int insertBlock (int cell, td::BlockType type);       // like addBlock, but shifts occupied cells right
     td::Gear unitGear (int unit) const;
+    void autoCabForCapture (int unit);   // RIG -> cab off, AMP -> cab on
     juce::String unitShortName (int unit) const;
     juce::String unitLongName (int unit) const;
     static juce::String peekGear (const juce::File& modelFile);
 
     // Files: which = 0 model, 1 IR A, 2 IR B
-    void loadUnitFile (int unit, int which, const juce::File& file, const juce::String& gearHint = {});
+    void loadUnitFile (int unit, int which, const juce::File& file, const juce::String& gearHint = {}, bool autoCab = true);
     void clearUnitFile (int unit, int which);
     static td::SlotKind kindForFile (const juce::File& f);
     static juce::String modelWildcard() { return "*.nam;*.json;*.aidax"; }

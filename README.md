@@ -26,7 +26,7 @@ Formatos: **VST3** (Windows / macOS / Linux), **AU** (macOS), **CLAP**, **LV2** 
 | Delay / Reverb | Delay estéreo / ping-pong, Reverb con pre-delay (ambos con "trails": la cola sigue al apagarlos) |
 | Utilidad | Volumen / Paneo |
 
-El bloque **CAPTURE** carga cualquier modelo y se rotula según el equipo capturado (dato de TONE3000 o `gear_type` del archivo .nam): **PED** pedal, **AMP** ampli, **RIG** ampli + gabinete, **OUT** outboard. Al cargar desde TONE3000 o la biblioteca, las capturas de pedal se ubican solas antes del ampli (corriendo la cadena) y las de ampli reemplazan al ampli. Si soltás el archivo sobre una celda concreta, va ahí.
+El bloque **CAPTURE** carga cualquier modelo y se rotula según el equipo capturado (dato de TONE3000 o `gear_type` del archivo .nam): **PED** pedal, **AMP** ampli, **RIG** ampli + gabinete, **OUT** outboard. Al cargar desde TONE3000 o la biblioteca, las capturas de pedal se ubican solas antes del ampli (corriendo la cadena) y las de ampli reemplazan al ampli. Si soltás el archivo sobre una celda concreta, va ahí. Al cargar un **RIG** el plugin apaga el CAB que viene después (ya trae parlante) y al cargar un **AMP** lo vuelve a encender.
 
 Las capturas no reproducen efectos que se mueven en el tiempo (chorus, flanger, phaser, trémolo, delay, reverb, wah): sólo el color y la saturación del equipo. El plugin avisa cuando el nombre lo sugiere y propone el bloque equivalente.
 

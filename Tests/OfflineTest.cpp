@@ -369,9 +369,14 @@ int main (int argc, char* argv[])
         tde->routeFile (-1, pedalFile, "pedal", true);
         check (p->unitAtCell (pedCell) == pedUnit && p->cellOfUnit (ampUnit) == ampCellBefore + 1, "a second pedal capture replaces the pedal slot (no duplicate)");
 
+        const int cabUnit = p->findUnitOfType (BlockType::Cab);
         tde->routeFile (-1, ampFile, "amp-cab", true);
         waitModel (*p, ampUnit);
         check (p->unitShortName (ampUnit) == "RIG", "TONE3000 gear amp-cab -> RIG label");
+        check (! p->isUnitOn (cabUnit), "RIG capture switches the CAB off (no double speaker)");
+        tde->routeFile (-1, ampFile, "amp", true);
+        waitModel (*p, ampUnit);
+        check (p->isUnitOn (cabUnit), "AMP (head) capture switches the CAB back on");
     }
 
     // --- full state round trip: layout, types, files, snapshots, footswitches, MIDI
