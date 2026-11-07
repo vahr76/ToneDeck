@@ -24,6 +24,15 @@ IN → NR (gate) → DRV (modelo de pedal) → AMP (modelo de ampli) → EQ → 
 
 \* Las perillas marcadas aparecen sólo si el modelo las admite: **Param 1/2** para modelos AIDA-X condicionados (entrada de 2 o 3 canales) y **Quality** para modelos NAM A2 "slimmable" (baja la calidad para ahorrar CPU).
 
+## TONE3000
+
+El botón **TONE3000** conecta el plugin con tu cuenta de [tone3000.com](https://www.tone3000.com):
+
+- **Elegir tono en el navegador**: se abre TONE3000, elegís un tono y ToneDeck descarga sus modelos a `Library/TONE3000/<tono>/` y lo carga en el bloque seleccionado (AMP o DRV; las IR van solas al CAB). Si el tono trae varias capturas, te deja elegir cuál.
+- **Mis favoritos / descargados / subidos, Populares, Nuevos**: listas de tu cuenta para cargar tonos sin salir del plugin.
+- La primera vez te pide tu **clave pública** (`t3k_pub_...`, se crea en *Settings → API Keys*). Nunca pegues la clave secreta (`t3k_cs_...`).
+- El login usa OAuth con PKCE y una dirección local (`127.0.0.1`), así que tu contraseña nunca pasa por el plugin. La sesión queda guardada en el archivo de ajustes de ToneDeck.
+
 ## Uso
 
 - **Clic en un bloque** de la pantalla → lo selecciona y las 5 perillas pasan a controlarlo.

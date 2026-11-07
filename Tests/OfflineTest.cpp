@@ -111,10 +111,22 @@ int main (int argc, char* argv[])
     ScopedJuceInitialiser_GUI gui;
     if (argc < 3) { std::cout << "usage: ToneDeckTests <outDir> <models...>\n"; return 2; }
 
+    int failures = 0;
+
+    // --- TONE3000 helpers: PKCE (checked against Python hashlib) and callback parsing
+    {
+        const bool pkce = Tone3000Client::makeCodeChallenge ("dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWChk2wM")
+                          == "g3PvRCpOycJ1Z_9rYibl5munWdXW-v-frWfa0OPnnVQ";   // reference: Python hashlib + urlsafe base64
+        const auto q = Tone3000Client::parseQuery ("code=abc%2F123&state=x-y_z&tone_id=4521&canceled=false");
+        const bool parse = q["code"] == "abc/123" && q["state"] == "x-y_z" && q["tone_id"] == "4521";
+        failures += (pkce ? 0 : 1) + (parse ? 0 : 1);
+        std::cout << (pkce ? "PASS " : "FAIL ") << "TONE3000 PKCE S256 challenge\n";
+        std::cout << (parse ? "PASS " : "FAIL ") << "TONE3000 callback query parsing\n";
+    }
+
     const File outDir (argv[1]);
     outDir.createDirectory();
     const auto ir = makeIR (outDir);
-    int failures = 0;
 
     for (int a = 2; a < argc; ++a)
     {

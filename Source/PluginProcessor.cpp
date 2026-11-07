@@ -26,6 +26,7 @@ ToneDeckProcessor::ToneDeckProcessor()
 ToneDeckProcessor::~ToneDeckProcessor()
 {
     stopTimer();
+    t3k.reset();
     loaderPool.removeAllJobs (true, 5000);
 }
 
@@ -463,6 +464,30 @@ void ToneDeckProcessor::timerCallback()
         if (juce::isPositiveAndBelow (prog, files.size()))
             loadPreset (files[prog]);
     }
+}
+
+//==============================================================================
+Tone3000Client& ToneDeckProcessor::tone3000()
+{
+    if (t3k == nullptr)
+    {
+        t3k = std::make_unique<Tone3000Client> (*appProps.getUserSettings(), [this] { return getLibraryFolder(); });
+        t3k->onStatus = [this] (const juce::String& m) { setOnlineMessage (m); };
+    }
+    return *t3k;
+}
+
+void ToneDeckProcessor::setOnlineMessage (const juce::String& msg)
+{
+    onlineMessage = msg;
+    onlineMessageTime = juce::Time::getMillisecondCounter();
+    sendChangeMessage();
+}
+
+juce::String ToneDeckProcessor::getOnlineMessage() const
+{
+    // messages fade out after 8 s
+    return juce::Time::getMillisecondCounter() - onlineMessageTime < 8000 ? onlineMessage : juce::String();
 }
 
 //==============================================================================

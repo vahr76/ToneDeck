@@ -162,6 +162,19 @@ void LcdDisplay::paint (Graphics& g)
     if (libraryMode) drawLibrary (g);
     else             drawDetail (g);
 
+    // status line (TONE3000 progress etc.)
+    const auto msg = proc.getOnlineMessage();
+    if (msg.isNotEmpty())
+    {
+        auto bar = r.reduced (10.0f, 8.0f).removeFromBottom (22.0f);
+        g.setColour (Colour (0xe0101a2e));
+        g.fillRoundedRectangle (bar, 5.0f);
+        g.setColour (colours::accent);
+        g.drawRoundedRectangle (bar, 5.0f, 1.0f);
+        g.setFont (lcdFont (12.0f, true));
+        g.drawText (msg, bar.reduced (10.0f, 0.0f), Justification::centredLeft, true);
+    }
+
     // glare
     Path glare;
     glare.addRoundedRectangle (r.withHeight (r.getHeight() * 0.42f), 8.0f);

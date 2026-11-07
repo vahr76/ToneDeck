@@ -55,6 +55,10 @@ private:
     void chooseLibraryFolder();
     void savePresetDialog();
     void layoutBody();
+    void showTone3000Menu();
+    void askClientId (std::function<void()> then);
+    void handleTone3000Result (const juce::Array<Tone3000Client::DownloadedModel>& models, const juce::String& error, int slot);
+    void showToneList (const juce::String& listName, const juce::String& title);
     int currentFileSlot() const;
 
     ToneDeckProcessor& proc;
@@ -71,11 +75,12 @@ private:
 
     juce::TextButton presetPrev { "< PRESET" }, presetNext { "PRESET >" }, presetSave { "SAVE" },
                      loadBtn { "LOAD" }, filePrev { "<" }, fileNext { ">" }, libraryBtn { "LIBRARY" },
-                     ejectBtn { "EJECT" }, normBtn { "NORMALIZE" };
+                     ejectBtn { "EJECT" }, normBtn { "NORMALIZE" }, t3kBtn { "TONE3000" };
     std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> normAtt;
 
     std::vector<std::unique_ptr<Footswitch>> footswitches;
     std::unique_ptr<juce::FileChooser> chooser;
+    juce::Component::SafePointer<ToneDeckEditor> safeThis { this };
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (ToneDeckEditor)
 };

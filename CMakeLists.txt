@@ -76,13 +76,25 @@ target_sources(ToneDeck PRIVATE
     Source/dsp/NamEngine.cpp
     Source/dsp/AidaEngine.cpp
     Source/ui/LcdDisplay.cpp
-    Source/ui/PedalLookAndFeel.cpp)
+    Source/ui/PedalLookAndFeel.cpp
+    Source/online/Tone3000Client.cpp)
 
 target_include_directories(ToneDeck PRIVATE Source)
 
+# TONE3000 publishable key baked in at build time (optional; users can also paste it in the plugin)
+set(TONEDECK_T3K_CLIENT_ID "" CACHE STRING "TONE3000 publishable key (t3k_pub_...)")
+
+# HTTPS: WinINet on Windows, NSURLSession on macOS, libcurl on Linux
+if(UNIX AND NOT APPLE)
+    set(TONEDECK_USE_CURL 1)
+else()
+    set(TONEDECK_USE_CURL 0)
+endif()
+
 target_compile_definitions(ToneDeck PUBLIC
+    TONEDECK_T3K_CLIENT_ID="${TONEDECK_T3K_CLIENT_ID}"
     JUCE_WEB_BROWSER=0
-    JUCE_USE_CURL=0
+    JUCE_USE_CURL=${TONEDECK_USE_CURL}
     JUCE_VST3_CAN_REPLACE_VST2=0
     JUCE_DISPLAY_SPLASH_SCREEN=0)
 
@@ -92,6 +104,7 @@ target_link_libraries(ToneDeck
         rtneural_lib
         juce::juce_audio_utils
         juce::juce_dsp
+        juce::juce_cryptography
     PUBLIC
         juce::juce_recommended_config_flags
         juce::juce_recommended_lto_flags
@@ -99,6 +112,11 @@ target_link_libraries(ToneDeck
 
 if(MSVC)
     target_compile_options(ToneDeck PRIVATE /bigobj)
+endif()
+
+if(TONEDECK_USE_CURL)
+    find_package(CURL REQUIRED)
+    target_link_libraries(ToneDeck PRIVATE CURL::libcurl)
 endif()
 
 # --- CLAP (Bitwig, Reaper, FL Studio 2024+, etc.)
@@ -122,10 +140,14 @@ if(TONEDECK_BUILD_TESTS)
         Source/dsp/NamEngine.cpp
         Source/dsp/AidaEngine.cpp
         Source/ui/LcdDisplay.cpp
-        Source/ui/PedalLookAndFeel.cpp)
+        Source/ui/PedalLookAndFeel.cpp
+        Source/online/Tone3000Client.cpp)
     target_include_directories(ToneDeckTests PRIVATE Source)
     target_compile_definitions(ToneDeckTests PRIVATE
-        JucePlugin_Name="ToneDeck" JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0 JUCE_STANDALONE_APPLICATION=1 JUCE_MODAL_LOOPS_PERMITTED=1)
+        JucePlugin_Name="ToneDeck" JUCE_WEB_BROWSER=0 JUCE_USE_CURL=${TONEDECK_USE_CURL} JUCE_STANDALONE_APPLICATION=1 JUCE_MODAL_LOOPS_PERMITTED=1)
     target_link_libraries(ToneDeckTests PRIVATE nam_core rtneural_lib
-        juce::juce_audio_utils juce::juce_dsp juce::juce_recommended_config_flags)
+        juce::juce_audio_utils juce::juce_dsp juce::juce_cryptography juce::juce_recommended_config_flags)
+    if(TONEDECK_USE_CURL)
+        target_link_libraries(ToneDeckTests PRIVATE CURL::libcurl)
+    endif()
 endif()

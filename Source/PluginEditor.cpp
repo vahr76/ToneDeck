@@ -89,8 +89,10 @@ ToneDeckEditor::ToneDeckEditor (ToneDeckProcessor& p)
     inputAtt  = std::make_unique<AudioProcessorValueTreeState::SliderAttachment> (proc.apvts, "in_gain", inputKnob);
     masterAtt = std::make_unique<AudioProcessorValueTreeState::SliderAttachment> (proc.apvts, "out_gain", masterKnob);
 
-    for (auto* b : { &presetPrev, &presetNext, &presetSave, &loadBtn, &filePrev, &fileNext, &libraryBtn, &ejectBtn, &normBtn })
+    for (auto* b : { &presetPrev, &presetNext, &presetSave, &loadBtn, &filePrev, &fileNext, &libraryBtn, &ejectBtn, &normBtn, &t3kBtn })
         body.addAndMakeVisible (*b);
+    t3kBtn.setTooltip ("Elegir y descargar tonos desde TONE3000");
+    t3kBtn.onClick = [this] { showTone3000Menu(); };
 
     normBtn.setClickingTogglesState (true);
     normBtn.setTooltip ("Level-match NAM models that carry loudness metadata (-18 dB)");
@@ -157,6 +159,7 @@ void ToneDeckEditor::layoutBody()
         b->setBounds (x, y, b == &presetSave ? 64 : 88, h);
         x += b->getWidth() + 6;
     }
+    t3kBtn.setBounds (x + 10, y, 104, h);
     x = baseW - 48;
     for (auto* b : { &normBtn, &ejectBtn, &libraryBtn, &fileNext, &filePrev, &loadBtn })
     {
@@ -394,4 +397,171 @@ void ToneDeckEditor::savePresetDialog()
         if (result == 1)
             proc.savePreset (w->getTextEditorContents ("name"));
     }), true);
+}
+
+//==============================================================================
+// TONE3000
+void ToneDeckEditor::askClientId (std::function<void()> then)
+{
+    auto* w = new AlertWindow ("TONE3000",
+                               "Pega tu clave PUBLICA de TONE3000 (empieza con t3k_pub_).\n"
+                               "La creas en tone3000.com > Settings > API Keys.\n"
+                               "Nunca uses la clave secreta (t3k_cs_).",
+                               MessageBoxIconType::NoIcon, this);
+    w->addTextEditor ("key", proc.tone3000().getClientId());
+    w->addButton ("Guardar", 1, KeyPress (KeyPress::returnKey));
+    w->addButton ("Cancelar", 0, KeyPress (KeyPress::escapeKey));
+    auto safe = safeThis;
+    w->enterModalState (true, ModalCallbackFunction::create ([safe, w, then] (int result)
+    {
+        if (safe == nullptr || result != 1)
+            return;
+        const auto key = w->getTextEditorContents ("key").trim();
+        if (key.startsWith ("t3k_cs_"))
+        {
+            AlertWindow::showMessageBoxAsync (MessageBoxIconType::WarningIcon, "TONE3000",
+                                              "Esa es la clave SECRETA. No la uses en el plugin: borrala/rotala en TONE3000 y pega la publica (t3k_pub_).");
+            return;
+        }
+        safe->proc.tone3000().setClientId (key);
+        if (key.isNotEmpty() && then)
+            then();
+    }), true);
+}
+
+void ToneDeckEditor::showTone3000Menu()
+{
+    auto& t3k = proc.tone3000();
+    if (t3k.getClientId().isEmpty())
+    {
+        askClientId ([this] { showTone3000Menu(); });
+        return;
+    }
+
+    const int targetSlot = currentFileSlot();
+    PopupMenu m;
+    m.addSectionHeader (t3k.isSignedIn() && t3k.getUsername().isNotEmpty() ? "TONE3000  -  " + t3k.getUsername() : String ("TONE3000"));
+    m.addItem (1, String ("Elegir tono en el navegador...  (-> ") + (targetSlot == td::Pedal ? "DRV" : targetSlot == td::Cab ? "CAB" : "AMP") + ")");
+    m.addSeparator();
+    m.addItem (2, "Mis favoritos");
+    m.addItem (3, "Mis descargados");
+    m.addItem (4, "Mis tonos subidos");
+    m.addItem (5, "Populares");
+    m.addItem (6, "Nuevos");
+    m.addSeparator();
+    m.addItem (7, "Abrir carpeta de descargas");
+    m.addItem (8, "Cambiar clave publica...");
+    m.addItem (9, "Cerrar sesion", t3k.isSignedIn());
+
+    auto safe = safeThis;
+    m.showMenuAsync (PopupMenu::Options().withTargetComponent (&t3kBtn), [safe, targetSlot] (int r)
+    {
+        if (safe == nullptr || r == 0)
+            return;
+        auto& self = *safe;
+        switch (r)
+        {
+            case 1:
+                self.proc.tone3000().selectTone ([safe, targetSlot] (auto models, auto error)
+                {
+                    if (safe != nullptr) safe->handleTone3000Result (models, error, targetSlot);
+                });
+                break;
+            case 2: self.showToneList ("favorited", "Mis favoritos"); break;
+            case 3: self.showToneList ("downloaded", "Mis descargados"); break;
+            case 4: self.showToneList ("created", "Mis tonos"); break;
+            case 5: self.showToneList ("trending", "Populares"); break;
+            case 6: self.showToneList ("latest", "Nuevos"); break;
+            case 7:
+            {
+                auto dir = self.proc.getLibraryFolder().getChildFile ("TONE3000");
+                dir.createDirectory();
+                dir.startAsProcess();
+                break;
+            }
+            case 8: self.askClientId ({}); break;
+            case 9: self.proc.tone3000().signOut(); self.proc.setOnlineMessage ("TONE3000: sesion cerrada"); break;
+            default: break;
+        }
+    });
+}
+
+void ToneDeckEditor::showToneList (const String& listName, const String& title)
+{
+    const int targetSlot = currentFileSlot();
+    auto safe = safeThis;
+    proc.tone3000().fetchList (listName, [safe, title, targetSlot] (Array<Tone3000Client::ToneItem> items, String error)
+    {
+        if (safe == nullptr)
+            return;
+        if (error.isNotEmpty())
+        {
+            safe->proc.setOnlineMessage (error);
+            return;
+        }
+        safe->proc.setOnlineMessage ({});
+        if (items.isEmpty())
+        {
+            safe->proc.setOnlineMessage ("TONE3000: la lista \"" + title + "\" esta vacia");
+            return;
+        }
+
+        PopupMenu m;
+        m.addSectionHeader (title);
+        for (int i = 0; i < items.size(); ++i)
+        {
+            const auto& it = items.getReference (i);
+            String label = it.title;
+            if (it.format.isNotEmpty()) label << "   [" << it.format.toUpperCase() << "]";
+            if (it.author.isNotEmpty()) label << "   by " << it.author;
+            m.addItem (i + 1, label);
+        }
+        m.showMenuAsync (PopupMenu::Options().withTargetComponent (&safe->t3kBtn).withMaximumNumColumns (2),
+                         [safe, items, targetSlot] (int r)
+        {
+            if (safe == nullptr || r <= 0)
+                return;
+            safe->proc.tone3000().fetchTone (items[r - 1].id, [safe, targetSlot] (auto models, auto error)
+            {
+                if (safe != nullptr) safe->handleTone3000Result (models, error, targetSlot);
+            });
+        });
+    });
+}
+
+void ToneDeckEditor::handleTone3000Result (const Array<Tone3000Client::DownloadedModel>& models, const String& error, int slot)
+{
+    if (models.isEmpty())
+    {
+        proc.setOnlineMessage (error.isNotEmpty() ? error : String ("TONE3000: sin resultados"));
+        return;
+    }
+
+    auto load = [this, slot] (const Tone3000Client::DownloadedModel& m)
+    {
+        const auto kind = ToneDeckProcessor::kindForFile (m.file);
+        const int target = kind == td::SlotKind::IR ? td::Cab : (slot == td::Cab ? td::Amp : slot);
+        proc.loadFile (target, m.file);
+        selectBlock (target);
+        proc.setOnlineMessage ("TONE3000: cargado " + m.modelName);
+    };
+
+    if (models.size() == 1)
+    {
+        load (models.getReference (0));
+        return;
+    }
+
+    // a tone often ships several captures (gain settings, sizes): let the user pick
+    proc.setOnlineMessage ("TONE3000: " + String (models.size()) + " modelos descargados en la biblioteca");
+    PopupMenu m;
+    m.addSectionHeader (models.getReference (0).toneTitle);
+    for (int i = 0; i < models.size(); ++i)
+        m.addItem (i + 1, models.getReference (i).modelName);
+    auto safe = safeThis;
+    m.showMenuAsync (PopupMenu::Options().withTargetComponent (&t3kBtn), [safe, models, load] (int r)
+    {
+        if (safe != nullptr && r > 0)
+            load (models.getReference (r - 1));
+    });
 }

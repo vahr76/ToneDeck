@@ -7,6 +7,7 @@
 #include "Params.h"
 #include "dsp/Effects.h"
 #include "dsp/ModelSlot.h"
+#include "online/Tone3000Client.h"
 
 // What the UI shows about a loaded file (message thread only).
 struct SlotStatus
@@ -72,6 +73,11 @@ public:
     juce::String getCurrentPresetName() const { return currentPresetName; }
     void stepPreset (int delta);
 
+    // TONE3000 + status line shown at the bottom of the LCD
+    Tone3000Client& tone3000();
+    void setOnlineMessage (const juce::String& msg);
+    juce::String getOnlineMessage() const;
+
     juce::AudioProcessorValueTreeState apvts;
     LevelMeter inputMeter, outputMeter;
     std::atomic<float> gateGain { 1.0f };
@@ -113,6 +119,9 @@ private:
 
     juce::ApplicationProperties appProps;
     juce::String currentPresetName { "INIT" };
+    std::unique_ptr<Tone3000Client> t3k;
+    juce::String onlineMessage;
+    juce::uint32 onlineMessageTime = 0;
 
     JUCE_DECLARE_WEAK_REFERENCEABLE (ToneDeckProcessor)
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (ToneDeckProcessor)
