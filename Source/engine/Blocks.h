@@ -27,6 +27,9 @@ public:
     // Called instead of process() when bypassed; blocks with tails (delay/reverb) keep ringing.
     virtual void processBypassed (float* /*L*/, float* /*R*/, int /*n*/, const float* /*p*/, const RigContext&) {}
     virtual int latency() const { return 0; }
+    // For the UI: gate gain (0 closed .. 1 open), detected input level in dB; -1 / -100 when n/a.
+    virtual float activity() const { return -1.0f; }
+    virtual float detectedDb() const { return -100.0f; }
 
     const BlockType type;
 };

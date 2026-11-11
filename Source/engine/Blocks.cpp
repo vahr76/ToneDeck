@@ -56,27 +56,37 @@ class GateBlock final : public Block
 {
 public:
     GateBlock() : Block (BlockType::Gate) {}
-    void prepare (double s, int) override { sr = s; env = 0; gain = 1; }
+    void prepare (double s, int) override { sr = s; env = 0; gain = 1; hold = 0; isOpen = false; }
     void process (float* L, float* R, int n, const float* p, const RigContext&) override
     {
-        const float open  = dbToGain (p[0]), close = dbToGain (p[0] - 6.0f);
+        const float open  = dbToGain (p[0]), close = dbToGain (p[0] - 6.0f);   // 6 dB hysteresis
+        const float floor = dbToGain (p[2]);                                    // RANGE: how far it closes
         const float rel   = std::exp (-1.0f / (0.001f * jmax (5.0f, p[1]) * (float) sr));
         const float att   = std::exp (-1.0f / (0.0005f * (float) sr));
-        const float envC  = std::exp (-1.0f / (0.005f * (float) sr));
-        const int holdSamples = (int) (0.02 * sr);
+        // RMS-style detector (10 ms): noise spikes don't keep the gate open, playing does
+        const float envC  = std::exp (-1.0f / (0.010f * (float) sr));
+        const int holdSamples = (int) (0.05 * sr);
+        float peakEnv = 0.0f;
         for (int i = 0; i < n; ++i)
         {
-            const float a = 0.5f * (std::abs (L[i]) + std::abs (R[i]));
-            env = a > env ? a : env * envC + a * (1.0f - envC);
-            if (env > open)       { isOpen = true; hold = holdSamples; }
-            else if (env < close) { if (hold > 0) --hold; else isOpen = false; }
-            const float target = isOpen ? 1.0f : 0.0f;
+            const float a = 0.5f * (L[i] * L[i] + R[i] * R[i]);
+            env = envC * env + (1.0f - envC) * a;
+            const float level = std::sqrt (env) * 1.4142f;   // ~ peak of a sine with that RMS
+            peakEnv = jmax (peakEnv, level);
+            if (level > open)       { isOpen = true; hold = holdSamples; }
+            else if (level < close) { if (hold > 0) --hold; else isOpen = false; }
+            const float target = isOpen ? 1.0f : floor;
             gain = target + (gain - target) * (target > gain ? att : rel);
             L[i] *= gain; R[i] *= gain;
         }
+        gainOut.store (gain, std::memory_order_relaxed);
+        levelOut.store (Decibels::gainToDecibels (peakEnv, -100.0f), std::memory_order_relaxed);
     }
+    float activity() const override   { return gainOut.load (std::memory_order_relaxed); }
+    float detectedDb() const override { return levelOut.load (std::memory_order_relaxed); }
 private:
     double sr = 48000; float env = 0, gain = 1; int hold = 0; bool isOpen = false;
+    std::atomic<float> gainOut { 1.0f }, levelOut { -100.0f };
 };
 
 //==============================================================================

@@ -77,6 +77,8 @@ public:
     void moveBlock (int fromCell, int toCell);            // swaps when target is occupied
     void changeBlockType (int cell, td::BlockType type);
     void toggleUnit (int unit);
+    float unitActivity (int unit) const;     // gate: 0 closed .. 1 open, -1 n/a
+    float unitDetectedDb (int unit) const;
     bool isUnitOn (int unit) const;
     int findUnitOfType (td::BlockType type) const;
     void resetToDefaultRig();

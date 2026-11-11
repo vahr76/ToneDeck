@@ -107,7 +107,8 @@ inline const BlockInfo& blockInfo (BlockType t)
     static const std::array<BlockInfo, (size_t) BlockType::NumTypes> table {{
         { "---", "EMPTY", Category::Utility, 0xff2a3346, {} },
         { "NR", "NOISE GATE", Category::Dynamics, col::dyn,
-          { P { "THRESH", -90, -20, -65, Fmt::Db }, P { "RELEASE", 5, 500, 80, Fmt::Ms, true } } },
+          { P { "THRESH", -90, -20, -55, Fmt::Db }, P { "RELEASE", 5, 500, 80, Fmt::Ms, true },
+            P { "RANGE", -90, 0, -90, Fmt::Db } } },
         { "CMP", "COMPRESSOR", Category::Dynamics, col::dyn,
           { P { "THRESH", -50, 0, -24, Fmt::Db }, P { "RATIO", 1, 20, 4, Fmt::Ratio, true },
             P { "ATTACK", 0.5f, 100, 10, Fmt::Ms, true }, P { "RELEASE", 10, 1000, 120, Fmt::Ms, true },

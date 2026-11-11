@@ -411,6 +411,12 @@ void LcdDisplay::drawGrid (Graphics& g)
         g.setFont (lcdFont (11.0f, true));
         g.drawText (proc.unitShortName (u), rect.withTrimmedTop (rect.getHeight() - 15.0f), Justification::centred);
 
+        if (st.type == BlockType::Gate && isOn)
+        {
+            const bool gOpen = proc.unitActivity (u) > 0.5f;
+            g.setColour (gOpen ? Colour (0xff1fae5c) : Colour (0xffff3b3b));
+            g.fillEllipse (Rectangle<float> (7.0f, 7.0f).withCentre ({ rect.getRight() - 7.0f, rect.getY() + 7.0f }));
+        }
         if (st.files[0].loading)
         {
             const float t = (float) (Time::getMillisecondCounter() % 1000) / 1000.0f;
@@ -560,6 +566,32 @@ void LcdDisplay::drawDetail (Graphics& g)
     {
         drawFileBox (g, fileBox (1), st.files[1], "IR A: vacia", c);
         drawFileBox (g, fileBox (2), st.files[2], "IR B: vacia", c);
+    }
+    else if (st.type == BlockType::Gate)
+    {
+        // input level vs threshold, and open/closed LED: makes THRESH easy to set
+        auto area = left.withTrimmedTop (6.0f);
+        const float lvl = proc.unitDetectedDb (u);
+        const auto& spec = info.params[0];
+        const float thr = spec.toPlain (proc.unitParam (u, 0)->getValue());
+        const float act = proc.unitActivity (u);
+        const bool open = act > 0.5f || ! isOn;
+        auto ledRow = area.removeFromTop (18.0f);
+        const auto led = Rectangle<float> (12.0f, 12.0f).withCentre ({ ledRow.getX() + 6.0f, ledRow.getCentreY() });
+        g.setColour (open ? Colour (0xff3ddc84) : Colour (0xffff4d4d));
+        g.fillEllipse (led);
+        g.setFont (lcdFont (12.0f, true));
+        g.drawText (! isOn ? "APAGADO" : (open ? "ABIERTO (pasa la senal)" : "CERRADO (silencia el ruido)"),
+                    ledRow.withTrimmedLeft (20.0f), Justification::centredLeft);
+        area.removeFromTop (4.0f);
+        auto bar = area.removeFromTop (14.0f);
+        const auto toX = [&] (float db) { return bar.getX() + bar.getWidth() * jlimit (0.0f, 1.0f, (db + 90.0f) / 90.0f); };
+        g.setColour (Colour (0xff1a2232)); g.fillRoundedRectangle (bar, 3.0f);
+        g.setColour (c.withAlpha (0.8f));  g.fillRoundedRectangle (bar.withRight (toX (lvl)), 3.0f);
+        g.setColour (Colours::white);      g.fillRect (Rectangle<float> (2.0f, bar.getHeight() + 6.0f).withCentre ({ toX (thr), bar.getCentreY() }));
+        g.setFont (lcdFont (10.5f));
+        g.setColour (colours::lcdDim);
+        g.drawText ("nivel " + String (roundToInt (lvl)) + " dB   |   linea blanca = THRESH", area.removeFromTop (16.0f), Justification::centredLeft);
     }
     else
     {

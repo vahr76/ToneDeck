@@ -223,6 +223,37 @@ int main (int argc, char* argv[])
         }
     }
 
+    // --- noise gate: hum/hiss alone is silenced, playing passes through
+    {
+        auto p = makeProc (48000, 512);
+        for (int c = 0; c < kGridCells; ++c) if (p->unitAtCell (c) >= 0) p->removeBlock (c);
+        const int u = p->addBlock (0, BlockType::Gate);   // default THRESH -55 dB
+        Random rng (5);
+        AudioBuffer<float> b (2, 512);
+        MidiBuffer m;
+        const auto block = [&] (float noiseRms, float sineAmp, int k)
+        {
+            for (int i = 0; i < 512; ++i)
+            {
+                const float s = noiseRms * 1.732f * (rng.nextFloat() * 2.0f - 1.0f)
+                              + sineAmp * (float) std::sin ((k * 512 + i) * 2.0 * 3.14159 * 196.0 / 48000.0);
+                b.setSample (0, i, s); b.setSample (1, i, s);
+            }
+            p->processBlock (b, m);
+            return b.getRMSLevel (0, 0, 512);
+        };
+        float noiseOut = 0, playOut = 0;
+        for (int k = 0; k < 60; ++k) { const float r = block (0.0005f, 0.0f, k); if (k > 30) noiseOut = jmax (noiseOut, r); }   // -66 dB noise
+        const bool closedOnNoise = p->unitActivity (u) < 0.05f;
+        for (int k = 0; k < 20; ++k) { const float r = block (0.0005f, 0.2f, k); if (k > 5) playOut = jmax (playOut, r); }
+        check (Decibels::gainToDecibels (noiseOut, -200.0f) < -95.0f && closedOnNoise && p->unitActivity (u) > 0.5f && playOut > 0.1f,
+               "noise gate: noise " + String (Decibels::gainToDecibels (0.0005f), 0) + " dB -> " + String (Decibels::gainToDecibels (noiseOut, -200.0f), 0)
+               + " dB, playing passes (" + String (Decibels::gainToDecibels (playOut), 1) + " dB)");
+        setNorm (p->unitParam (u, 2), blockInfo (BlockType::Gate).params[2].toNorm (-20.0f));   // RANGE -20 dB
+        for (int k = 0; k < 60; ++k) noiseOut = block (0.0005f, 0.0f, k);
+        check (std::abs (Decibels::gainToDecibels (noiseOut) - (-66.0f - 20.0f)) < 2.0f, "noise gate RANGE -20 dB only lowers the noise 20 dB");
+    }
+
     // --- octaver: down / up land on the right pitch, both modes
     {
         const auto measure = [&] (int mode, float d1, float u1)
@@ -485,6 +516,7 @@ int main (int argc, char* argv[])
             std::cout << "snapshot " << f.getFullPathName() << "\n";
         };
         auto select = [&] (int cell) { tde->getLcd().setSelection (cell); if (tde->getLcd().onSelect) tde->getLcd().onSelect (cell); };
+        select (q->cellOfUnit (q->findUnitOfType (BlockType::Gate))); save ("ui_gate.png");
         select (q->cellOfUnit (amp)); save ("ui_amp.png");
         select (q->cellOfUnit (cab)); save ("ui_cab.png");
         select (Layout::index (1, 5)); save ("ui_parallel.png");
