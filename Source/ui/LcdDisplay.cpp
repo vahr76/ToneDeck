@@ -127,6 +127,17 @@ void drawBlockIcon (Graphics& g, BlockType t, Rectangle<float> r, Colour c)
             g.strokePath (p, stroke);
             break;
         }
+        case BlockType::CompFet: case BlockType::CompOpto: case BlockType::CompVca:
+        case BlockType::CompVariMu: case BlockType::CompStomp:
+        {
+            // VU meter with needle
+            Path arc;
+            arc.addCentredArc (cx, cy + s * 0.35f, s * 0.6f, s * 0.6f, 0.0f, -1.0f, 1.0f, true);
+            g.strokePath (arc, stroke);
+            const float a = -0.6f;
+            g.drawLine (cx, cy + s * 0.35f, cx + std::sin (a) * s * 0.55f, cy + s * 0.35f - std::cos (a) * s * 0.55f, 1.6f);
+            break;
+        }
         case BlockType::Octaver:
         {
             // two notes an octave apart
@@ -566,6 +577,35 @@ void LcdDisplay::drawDetail (Graphics& g)
     {
         drawFileBox (g, fileBox (1), st.files[1], "IR A: vacia", c);
         drawFileBox (g, fileBox (2), st.files[2], "IR B: vacia", c);
+    }
+    else if (proc.unitGainReduction (u) >= 0.0f)
+    {
+        // VU-style gain reduction meter, like the needle on the hardware
+        auto area = left.withTrimmedTop (8.0f);
+        const float gr = isOn ? proc.unitGainReduction (u) : 0.0f;
+        g.setFont (lcdFont (11.0f, true));
+        g.setColour (colours::lcdText);
+        g.drawText ("GAIN REDUCTION   -" + String (gr, 1) + " dB", area.removeFromTop (16.0f), Justification::centredLeft);
+        auto bar = area.removeFromTop (14.0f);
+        const int segs = 20;
+        const float sw = bar.getWidth() / (float) segs;
+        for (int k = 0; k < segs; ++k)
+        {
+            const float dbAt = (float) (k + 1);   // 1 dB per segment, 0..20 dB
+            const bool lit = gr >= dbAt - 0.5f;
+            const Colour cc = k < 6 ? c : (k < 12 ? Colour (0xffffc24d) : Colour (0xffff4d4d));
+            g.setColour (lit ? cc : cc.withAlpha (0.12f));
+            g.fillRoundedRectangle (Rectangle<float> (bar.getX() + sw * (float) k + 1.0f, bar.getY(), sw - 2.0f, bar.getHeight()), 1.5f);
+        }
+        g.setFont (lcdFont (10.0f));
+        g.setColour (colours::lcdDim);
+        auto labels = area.removeFromTop (14.0f);
+        for (int dbMark : { 0, 6, 12, 20 })
+        {
+            const float x = bar.getX() + sw * (float) dbMark;
+            const auto txt = dbMark == 0 ? String ("0") : "-" + String (dbMark);
+            g.drawText (txt, Rectangle<float> (dbMark == 20 ? x - 40.0f : x, labels.getY(), 40.0f, labels.getHeight()), dbMark == 20 ? Justification::centredRight : Justification::centredLeft);
+        }
     }
     else if (st.type == BlockType::Gate)
     {

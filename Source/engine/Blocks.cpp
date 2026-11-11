@@ -504,6 +504,209 @@ private:
     LinearSmoothedValue<float> gl, gr;
 };
 //==============================================================================
+// Studio compressors. One engine, five characters:
+//  FET    feed-forward peak detector, 20-800 us attack, ratio buttons, "all buttons" mode, odd harmonics
+//  OPTO   feedback detector, ~10 ms attack, two-stage program-dependent release (opto cell), soft knee
+//  VCA    feed-forward RMS, hard knee, stepped attack/release with program-dependent auto release, clean
+//  VARIMU ratio grows with gain reduction (very soft knee), stepped time constants, tube saturation
+//  STOMP  feedback OTA pedal: high ratio, sustain = sensitivity, darker tone, slight squash
+class StudioCompBlock final : public Block
+{
+public:
+    explicit StudioCompBlock (BlockType t) : Block (t) {}
+
+    void prepare (double s, int maxBlock) override
+    {
+        sr = s;
+        dryBuf.setSize (2, maxBlock);
+        reset();
+        for (auto* f : { &emphL, &toneL, &toneR }) { f->coefficients = new dsp::IIR::Coefficients<float> (1.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f); f->prepare ({ s, (uint32) maxBlock, 1 }); }
+        cache.fill (-999.0f);
+        outGain.reset (s, 0.03);
+    }
+
+    void reset() override
+    {
+        grS = grFast = grSlow = 0.0f; rms = 0.0f; fbLevel = 0.0f; charge = 0.0f; lastOut = 0.0f;
+        emphL.reset(); toneL.reset(); toneR.reset();
+    }
+
+    float gainReductionDb() const override { return grOut.load (std::memory_order_relaxed); }
+
+    void process (float* L, float* R, int n, const float* p, const RigContext&) override
+    {
+        if (dryBuf.getNumSamples() < n) return;
+        dryBuf.copyFrom (0, 0, L, n); dryBuf.copyFrom (1, 0, R, n);
+        const float fsr = (float) sr;
+        const auto coef = [fsr] (float seconds) { return std::exp (-1.0f / (jmax (1.0e-5f, seconds) * fsr)); };
+
+        float inG = 1.0f, outDb = 0.0f, mixAmt = 1.0f, thr = -20.0f, ratio = 4.0f, knee = 6.0f;
+        float att = coef (0.005f), rel = coef (0.2f);
+        bool feedback = false, useRms = false, autoRel = false, varimu = false, allButtons = false;
+        float drive = 0.0f;   // saturation amount
+        float scBoostDb = 0.0f;
+
+        switch (type)
+        {
+            case BlockType::CompFet:
+            {
+                inG = dbToGain (p[0]); outDb = p[1];
+                att = coef (p[2] * 0.001f); rel = coef (p[3] * 0.001f);
+                const int r = (int) p[4];
+                const float ratios[] = { 4.0f, 8.0f, 12.0f, 20.0f, 30.0f };
+                ratio = ratios[jlimit (0, 4, r)];
+                allButtons = r == 4;
+                thr = -18.0f; knee = allButtons ? 0.0f : 3.0f;
+                drive = allButtons ? 0.35f : 0.12f;
+                mixAmt = p[5];
+                break;
+            }
+            case BlockType::CompOpto:
+            {
+                scBoostDb = p[0] * 40.0f;           // peak reduction = sidechain gain into a fixed threshold
+                outDb = p[1];
+                const bool limit = p[2] > 0.5f;
+                ratio = limit ? 12.0f : 3.0f; knee = limit ? 6.0f : 14.0f; thr = -10.0f;
+                att = coef (0.010f);
+                feedback = true; drive = 0.08f;
+                if (changed (cache, { p[3] }))   // emphasis: more HF in the sidechain
+                    *emphL.coefficients = AC::makeHighShelf (sr, 2000.0f, 0.7f, dbToGain (p[3] * 12.0f));
+                mixAmt = p[4];
+                break;
+            }
+            case BlockType::CompVca:
+            {
+                thr = p[0];
+                const float ratios[] = { 2.0f, 4.0f, 10.0f };
+                ratio = ratios[jlimit (0, 2, (int) p[1])];
+                const float atts[] = { 0.0001f, 0.0003f, 0.001f, 0.003f, 0.01f, 0.03f };
+                att = coef (atts[jlimit (0, 5, (int) p[2])]);
+                const float rels[] = { 0.1f, 0.3f, 0.6f, 1.2f, 0.3f };
+                const int ri = jlimit (0, 4, (int) p[3]);
+                rel = coef (rels[ri]); autoRel = ri == 4;
+                outDb = p[4]; mixAmt = p[5];
+                knee = 2.0f; useRms = true;
+                break;
+            }
+            case BlockType::CompVariMu:
+            {
+                inG = dbToGain (p[0]); thr = p[1]; outDb = p[3]; mixAmt = p[4];
+                const float atts[] = { 0.0002f, 0.0002f, 0.0004f, 0.0004f, 0.0004f, 0.0002f };
+                const float rels[] = { 0.3f, 0.8f, 2.0f, 5.0f, 2.0f, 0.3f };
+                const int tc = jlimit (0, 5, (int) p[2]);
+                att = coef (atts[tc] * 25.0f);   // tube grid smoothing makes the effective attack softer
+                rel = coef (rels[tc]); autoRel = tc >= 4;
+                varimu = true; knee = 18.0f; ratio = 6.0f; drive = 0.15f;
+                break;
+            }
+            case BlockType::CompStomp:
+            {
+                thr = -10.0f - p[0] * 40.0f;   // sustain = sensitivity
+                ratio = 10.0f; knee = 4.0f; feedback = true;
+                att = coef (p[2] > 0.5f ? 0.020f : 0.003f);
+                rel = coef (0.35f);
+                outDb = p[1] + 6.0f + p[0] * 12.0f;   // built-in makeup so the level stays usable
+                drive = 0.1f;
+                if (changed (cache, { 999.0f + p[3] }))
+                {
+                    const auto c = AC::makeLowPass (sr, 2500.0f * std::pow (4.0f, p[3]), 0.707f);
+                    *toneL.coefficients = c; *toneR.coefficients = c;
+                }
+                mixAmt = p[4];
+                break;
+            }
+            default: break;
+        }
+
+        outGain.setTargetValue (dbToGain (outDb));
+        const float rmsC = coef (0.005f);
+        const float fastRel = coef (0.06f);
+        float maxGr = 0.0f;
+
+        for (int i = 0; i < n; ++i)
+        {
+            float xl = L[i] * inG, xr = R[i] * inG;
+
+            // ---- detector
+            float sc;
+            if (feedback)
+                sc = lastOut;                                   // level of the previous output sample
+            else if (useRms)
+            {
+                rms = rmsC * rms + (1.0f - rmsC) * 0.5f * (xl * xl + xr * xr);
+                sc = std::sqrt (rms) * 1.4142f;
+            }
+            else
+                sc = jmax (std::abs (xl), std::abs (xr));
+            if (type == BlockType::CompOpto)
+                sc = std::abs (emphL.processSample (sc)) * dbToGain (scBoostDb);
+            const float lvl = Decibels::gainToDecibels (sc, -120.0f);
+
+            // ---- gain computer (soft knee)
+            float over = lvl - thr, gr = 0.0f;
+            float r = ratio;
+            if (varimu) r = 1.5f + jmin (4.5f, jmax (0.0f, over) * 0.25f);   // ratio rises with level
+            if (knee > 0.0f && std::abs (over) < knee * 0.5f)
+                gr = (1.0f - 1.0f / r) * (over + knee * 0.5f) * (over + knee * 0.5f) / (2.0f * knee);
+            else if (over > 0.0f)
+                gr = (1.0f - 1.0f / r) * over;
+
+            // ---- ballistics
+            if (type == BlockType::CompOpto)
+            {
+                // opto cell: fast attack; release = 50% quick (~60 ms) + 50% slow, slower the longer it was hit
+                charge = jlimit (0.0f, 1.0f, charge + (gr > 1.0f ? 1.0f / (2.0f * fsr) : -1.0f / (6.0f * fsr)));
+                const float slowRel = coef (0.5f + 4.5f * charge);
+                grFast = gr > grFast ? gr + (grFast - gr) * att : gr + (grFast - gr) * fastRel;
+                grSlow = gr > grSlow ? gr + (grSlow - gr) * att : gr + (grSlow - gr) * slowRel;
+                grS = 0.5f * (grFast + grSlow);
+            }
+            else if (autoRel)
+            {
+                // program dependent: fast release for transients, slow for sustained reduction
+                grFast = gr > grFast ? gr + (grFast - gr) * att : gr + (grFast - gr) * coef (0.08f);
+                grSlow = gr > grSlow ? gr + (grSlow - gr) * coef (0.15f) : gr + (grSlow - gr) * coef (type == BlockType::CompVariMu ? 10.0f : 1.5f);
+                grS = jmax (grFast, grSlow);
+            }
+            else
+                grS = gr > grS ? gr + (grS - gr) * att : gr + (grS - gr) * rel;
+
+            maxGr = jmax (maxGr, grS);
+            const float g = dbToGain (-grS);
+            xl *= g; xr *= g;
+
+            // ---- colour
+            if (drive > 0.0f)
+            {
+                const float k = 1.0f + drive * 4.0f;
+                const float bias = type == BlockType::CompFet ? 0.0f : drive * 0.3f;   // tubes/opto: even harmonics
+                const float nb = std::tanh (bias * k);
+                xl = (std::tanh ((xl + bias) * k) - nb) / k;
+                xr = (std::tanh ((xr + bias) * k) - nb) / k;
+            }
+            if (type == BlockType::CompStomp) { xl = toneL.processSample (xl); xr = toneR.processSample (xr); }
+
+            lastOut = jmax (std::abs (xl), std::abs (xr));
+            const float og = outGain.getNextValue();
+            L[i] = xl * og; R[i] = xr * og;
+        }
+
+        mix (L, dryBuf.getReadPointer (0), mixAmt, n);
+        mix (R, dryBuf.getReadPointer (1), mixAmt, n);
+        grOut.store (maxGr, std::memory_order_relaxed);
+    }
+
+private:
+    double sr = 48000.0;
+    AudioBuffer<float> dryBuf;
+    dsp::IIR::Filter<float> emphL, toneL, toneR;
+    std::array<float, 1> cache {};
+    LinearSmoothedValue<float> outGain;
+    float grS = 0, grFast = 0, grSlow = 0, rms = 0, fbLevel = 0, charge = 0, lastOut = 0;
+    std::atomic<float> grOut { 0.0f };
+};
+
+//==============================================================================
 // Octaver. Polyphonic: two crossfaded delay-line pitch shifters per interval (works with chords).
 // Analog: OC-2 style flip-flop sub octaves + full-wave-rectifier octave up (single notes, synthy).
 class OctaverBlock final : public Block
@@ -724,6 +927,9 @@ std::unique_ptr<Block> createBlock (BlockType t)
         case BlockType::Reverb:     return std::make_unique<ReverbBlock>();
         case BlockType::Volume:     return std::make_unique<VolumeBlock>();
         case BlockType::Octaver:    return std::make_unique<OctaverBlock>();
+        case BlockType::CompFet: case BlockType::CompOpto: case BlockType::CompVca:
+        case BlockType::CompVariMu: case BlockType::CompStomp:
+                                    return std::make_unique<StudioCompBlock> (t);
         case BlockType::Empty:
         case BlockType::NumTypes:   break;
     }

@@ -1,6 +1,6 @@
 # ToneDeck — Neural Amp & IR Multi-FX
 
-Multiefectos de guitarra con la flexibilidad de una HX Stomp y la simpleza de una pedalera compacta. Carga **capturas NAM** (incluida la arquitectura **A2**), **AIDA-X**, **GuitarML / Proteus** e **IRs** de gabinete, y tiene 18 efectos propios, dos caminos en paralelo, snapshots, looper, afinador y MIDI learn.
+Multiefectos de guitarra con la flexibilidad de una HX Stomp y la simpleza de una pedalera compacta. Carga **capturas NAM** (incluida la arquitectura **A2**), **AIDA-X**, **GuitarML / Proteus** e **IRs** de gabinete, y tiene 23 efectos propios, dos caminos en paralelo, snapshots, looper, afinador y MIDI learn.
 
 ![ToneDeck](docs/screenshot.png)
 
@@ -17,7 +17,7 @@ Formatos: **VST3** (Windows / macOS / Linux), **AU** (macOS), **CLAP**, **LV2** 
 
 | Categoría | Bloques |
 |---|---|
-| Dinámica | Noise Gate, Compresor |
+| Dinámica | Noise Gate, Compresor, y 5 compresores de estudio: **FET** (estilo 1176, con modo ALL), **OPTO** (estilo LA-2A, release en dos etapas), **VCA** (estilo bus SSL, auto release), **VARI-MU** (estilo Fairchild, constantes TC1–TC6) y **STOMP** (estilo Dyna Comp). Todos con medidor de reducción de ganancia y MIX para compresión en paralelo |
 | Drive | Clean Boost, Overdrive (tipo TS), Fuzz — con oversampling 2× |
 | Ampli / Gabinete | **Capture** (NAM, NAM A2, AIDA-X, GuitarML/Proteus) · **Gabinete con 2 IR** (A/B con blend) |
 | EQ | Tone Stack, EQ paramétrico |

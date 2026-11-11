@@ -30,6 +30,8 @@ public:
     // For the UI: gate gain (0 closed .. 1 open), detected input level in dB; -1 / -100 when n/a.
     virtual float activity() const { return -1.0f; }
     virtual float detectedDb() const { return -100.0f; }
+    // For the UI: compressor gain reduction in dB (>= 0); -1 when n/a.
+    virtual float gainReductionDb() const { return -1.0f; }
 
     const BlockType type;
 };

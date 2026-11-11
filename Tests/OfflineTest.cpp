@@ -254,6 +254,87 @@ int main (int argc, char* argv[])
         check (std::abs (Decibels::gainToDecibels (noiseOut) - (-66.0f - 20.0f)) < 2.0f, "noise gate RANGE -20 dB only lowers the noise 20 dB");
     }
 
+    // --- studio compressors: each one compresses, and with its own character
+    {
+        struct Run { std::vector<float> gr; float outRms = 0; bool finite = true; };
+        // feeds a 200 Hz sine: `quietS` s at -50 dBFS, `loudS` s at `loudDb`, then `tailS` s quiet; records GR per block
+        const auto runComp = [&] (BlockType t, std::function<void (ToneDeckProcessor&, int)> setup, float loudDb, double quietS, double loudS, double tailS)
+        {
+            auto p = makeProc (48000, 64);
+            for (int c = 0; c < kGridCells; ++c) if (p->unitAtCell (c) >= 0) p->removeBlock (c);
+            const int u = p->addBlock (0, t);
+            if (setup) setup (*p, u);
+            AudioBuffer<float> b (2, 64);
+            MidiBuffer m;
+            Run r;
+            double ph = 0, sq = 0; int cnt = 0;
+            const int total = (int) ((quietS + loudS + tailS) * 48000.0 / 64.0);
+            for (int k = 0; k < total; ++k)
+            {
+                const double tsec = k * 64.0 / 48000.0;
+                const bool loud = tsec >= quietS && tsec < quietS + loudS;
+                const float amp = Decibels::decibelsToGain (loud ? loudDb : -50.0f);
+                for (int i = 0; i < 64; ++i) { const float v = amp * (float) std::sin (ph); b.setSample (0, i, v); b.setSample (1, i, v); ph += MathConstants<double>::twoPi * 200.0 / 48000.0; }
+                p->processBlock (b, m);
+                for (int i = 0; i < 64; ++i) { const float v = b.getSample (0, i); if (! std::isfinite (v)) r.finite = false; if (loud) { sq += v * v; ++cnt; } }
+                r.gr.push_back (p->unitGainReduction (u));
+            }
+            r.outRms = (float) std::sqrt (sq / jmax (1, cnt));
+            return r;
+        };
+        const auto idx = [] (double sec) { return (size_t) (sec * 48000.0 / 64.0); };
+
+        for (auto t : { BlockType::CompFet, BlockType::CompOpto, BlockType::CompVca, BlockType::CompVariMu, BlockType::CompStomp })
+        {
+            const auto r = runComp (t, {}, -6.0f, 0.3, 1.0, 0.1);
+            const float quietGr = r.gr[idx (0.25)], loudGr = r.gr[idx (1.25)];
+            check (r.finite && loudGr > 2.0f && quietGr < 1.0f && r.outRms > 0.01f,
+                   String (blockInfo (t).shortName).paddedRight (' ', 4) + " compresses loud (-" + String (loudGr, 1) + " dB) and leaves quiet alone (-" + String (quietGr, 1) + " dB)");
+        }
+
+        // VCA: static curve. THRESH -20, 4:1, sine at -4 dBFS peak (detector reads peak-equivalent RMS) => 16 dB over => 12 dB GR
+        {
+            const auto r = runComp (BlockType::CompVca, [] (ToneDeckProcessor& p, int u)
+            {
+                const auto& ps = blockInfo (BlockType::CompVca).params;
+                setNorm (p.unitParam (u, 0), ps[0].toNorm (-20.0f));
+                setNorm (p.unitParam (u, 3), ps[3].toNorm (0.0f));   // 100 ms release (not auto)
+            }, -4.0f, 0.2, 1.5, 0.0);
+            const float gr = r.gr[idx (1.6)];
+            check (std::abs (gr - 12.0f) < 1.0f, "VCA 4:1 static curve: expected 12 dB GR, got " + String (gr, 1));
+        }
+
+        // FET attacks much faster than OPTO
+        const auto t50 = [&] (const Run& r, double from)
+        {
+            const float target = r.gr[idx (from + 0.9)] * 0.5f;
+            for (size_t k = idx (from); k < r.gr.size(); ++k) if (r.gr[k] >= target) return (float) ((k - idx (from)) * 64.0 / 48.0);
+            return 9999.0f;
+        };
+        const auto fet = runComp (BlockType::CompFet, {}, -6.0f, 0.3, 1.0, 1.5);
+        const auto opto = runComp (BlockType::CompOpto, {}, -6.0f, 0.3, 1.0, 1.5);
+        const float fetMs = t50 (fet, 0.3), optoMs = t50 (opto, 0.3);
+        check (fetMs < 2.0f && optoMs > 3.0f * fetMs, "FET attack " + String (fetMs, 2) + " ms is much faster than OPTO " + String (optoMs, 2) + " ms");
+
+        // OPTO two-stage release: after a long hit, recovery is slower than after a short one
+        const auto optoShort = runComp (BlockType::CompOpto, {}, -6.0f, 0.3, 0.15, 1.5);
+        const auto optoLong  = runComp (BlockType::CompOpto, {}, -6.0f, 0.3, 3.0, 1.5);
+        const auto remaining = [&] (const Run& r, double hitEnd)
+        {
+            const float start = r.gr[idx (hitEnd) - 1];
+            return r.gr[idx (hitEnd + 0.5)] / jmax (0.01f, start);
+        };
+        const float shortLeft = remaining (optoShort, 0.45), longLeft = remaining (optoLong, 3.3);
+        check (longLeft > shortLeft * 1.2f, "OPTO program-dependent release: 0.5 s after a long hit " + String (longLeft * 100, 0)
+               + "% GR left vs " + String (shortLeft * 100, 0) + "% after a short hit");
+
+        // FET "ALL" buttons squashes harder than 4:1
+        const auto fet4 = runComp (BlockType::CompFet, {}, -6.0f, 0.2, 0.6, 0.0);
+        const auto fetAll = runComp (BlockType::CompFet, [] (ToneDeckProcessor& p, int u) { setNorm (p.unitParam (u, 4), 1.0f); }, -6.0f, 0.2, 0.6, 0.0);
+        check (fetAll.gr[idx (0.7)] > fet4.gr[idx (0.7)] + 2.0f, "FET ALL-buttons mode squashes harder ("
+               + String (fetAll.gr[idx (0.7)], 1) + " vs " + String (fet4.gr[idx (0.7)], 1) + " dB)");
+    }
+
     // --- octaver: down / up land on the right pitch, both modes
     {
         const auto measure = [&] (int mode, float d1, float u1)
@@ -517,6 +598,13 @@ int main (int argc, char* argv[])
         };
         auto select = [&] (int cell) { tde->getLcd().setSelection (cell); if (tde->getLcd().onSelect) tde->getLcd().onSelect (cell); };
         select (q->cellOfUnit (q->findUnitOfType (BlockType::Gate))); save ("ui_gate.png");
+        {
+            const int optoCell = Layout::index (0, 7);
+            q->addBlock (optoCell, BlockType::CompOpto);
+            render (*q, 48000, 256, 0.6);
+            select (optoCell); save ("ui_comp.png");
+            q->removeBlock (optoCell);
+        }
         select (q->cellOfUnit (amp)); save ("ui_amp.png");
         select (q->cellOfUnit (cab)); save ("ui_cab.png");
         select (Layout::index (1, 5)); save ("ui_parallel.png");

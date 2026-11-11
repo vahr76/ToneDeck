@@ -370,6 +370,12 @@ float ToneDeckProcessor::unitDetectedDb (int unit) const
     return b != nullptr ? b->detectedDb() : -100.0f;
 }
 
+float ToneDeckProcessor::unitGainReduction (int unit) const
+{
+    auto* b = juce::isPositiveAndBelow (unit, kNumUnits) ? rig.units[(size_t) unit].getLatest() : nullptr;
+    return b != nullptr ? b->gainReductionDb() : -1.0f;
+}
+
 bool ToneDeckProcessor::isUnitOn (int unit) const
 {
     auto* prm = unitOnParam (unit);

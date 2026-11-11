@@ -29,6 +29,7 @@ enum class BlockType : int
     Delay, Reverb,
     Volume,
     Octaver,      // appended: block type numbers are stored in presets
+    CompFet, CompOpto, CompVca, CompVariMu, CompStomp,
     NumTypes
 };
 
@@ -154,6 +155,26 @@ inline const BlockInfo& blockInfo (BlockType t)
         { "OCT", "OCTAVER", Category::Pitch, 0xffff8a5c,
           { P { "-2 OCT", 0, 1, 0 }, P { "-1 OCT", 0, 1, 0.7f }, P { "+1 OCT", 0, 1, 0 }, P { "DRY", 0, 1, 0.8f },
             P { "TONE", 0, 1, 0.6f }, P { "MODE", 0, 1, 0, Fmt::Choice, false, "Polyphonic|Analog" } } },
+        // Studio compressors (behaviour inspired by classic hardware; names are descriptive only)
+        { "FET", "FET COMP (estilo 1176)", Category::Dynamics, col::dyn,
+          { P { "INPUT", 0, 48, 18, Fmt::Db }, P { "OUTPUT", -24, 12, -6, Fmt::Db },
+            P { "ATTACK", 0.02f, 0.8f, 0.2f, Fmt::Ms, true }, P { "RELEASE", 50, 1100, 250, Fmt::Ms, true },
+            P { "RATIO", 0, 4, 0, Fmt::Choice, false, "4:1|8:1|12:1|20:1|ALL" }, P { "MIX", 0, 1, 1 } } },
+        { "OPT", "OPTO COMP (estilo LA-2A)", Category::Dynamics, col::dyn,
+          { P { "PEAK RED", 0, 1, 0.45f }, P { "GAIN", -12, 24, 4, Fmt::Db },
+            P { "MODE", 0, 1, 0, Fmt::Choice, false, "Compress|Limit" }, P { "EMPHASIS", 0, 1, 0.3f }, P { "MIX", 0, 1, 1 } } },
+        { "VCA", "VCA BUS COMP (estilo SSL)", Category::Dynamics, col::dyn,
+          { P { "THRESH", -40, 0, -16, Fmt::Db }, P { "RATIO", 0, 2, 1, Fmt::Choice, false, "2:1|4:1|10:1" },
+            P { "ATTACK", 0, 5, 3, Fmt::Choice, false, "0.1 ms|0.3 ms|1 ms|3 ms|10 ms|30 ms" },
+            P { "RELEASE", 0, 4, 4, Fmt::Choice, false, "100 ms|300 ms|600 ms|1.2 s|Auto" },
+            P { "MAKEUP", -6, 24, 3, Fmt::Db }, P { "MIX", 0, 1, 1 } } },
+        { "MU", "VARI-MU COMP (estilo Fairchild)", Category::Dynamics, col::dyn,
+          { P { "INPUT", -12, 24, 6, Fmt::Db }, P { "THRESH", -40, 0, -20, Fmt::Db },
+            P { "TIME", 0, 5, 1, Fmt::Choice, false, "TC1 0.3 s|TC2 0.8 s|TC3 2 s|TC4 5 s|TC5 Auto|TC6 Auto" },
+            P { "OUTPUT", -24, 12, -3, Fmt::Db }, P { "MIX", 0, 1, 1 } } },
+        { "DYN", "STOMP COMP (estilo Dyna Comp)", Category::Dynamics, col::dyn,
+          { P { "SUSTAIN", 0, 1, 0.55f }, P { "LEVEL", -24, 12, 0, Fmt::Db },
+            P { "ATTACK", 0, 1, 0, Fmt::Choice, false, "Fast|Slow" }, P { "TONE", 0, 1, 0.5f }, P { "BLEND", 0, 1, 1 } } },
     }};
     return table[(size_t) juce::jlimit (0, (int) BlockType::NumTypes - 1, (int) t)];
 }
